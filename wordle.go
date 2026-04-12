@@ -254,6 +254,27 @@ func loadWordList(lang string, length int) (map[string]string, error) {
 	return words, nil
 }
 
+// normalizeWord returns the accent-stripped, lowercased form of a whole word,
+// joining the normalizeChar result for each grapheme cluster.
+func normalizeWord(word string) string {
+	chars := wordChars(word)
+	var b strings.Builder
+	for _, ch := range chars {
+		b.WriteString(normalizeChar(ch))
+	}
+	return b.String()
+}
+
+// buildNormalizedSet returns a set of normalized (accent-stripped) word forms
+// mapped back to one canonical original word. Used for variant-aware lookup.
+func buildNormalizedSet(words map[string]string) map[string]string {
+	set := make(map[string]string, len(words))
+	for w := range words {
+		set[normalizeWord(w)] = w
+	}
+	return set
+}
+
 // buildAlphabet collects all unique grapheme clusters from the word list.
 // Returns nil for logographic scripts with more than logographicThreshold chars.
 func buildAlphabet(wordList map[string]string) []string {

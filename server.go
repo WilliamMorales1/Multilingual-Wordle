@@ -35,7 +35,8 @@ func dataPath(name string) string {
 
 var (
 	db            *gorm.DB
-	wordListCache sync.Map // key: "lang:length" → map[string]string
+	wordListCache     sync.Map // key: "lang:length" → map[string]string
+	normalizedCache   sync.Map // key: "lang:length" → map[string]string (normalizedWord → original)
 	loadMu        sync.Mutex
 
 	langCacheMu sync.RWMutex
@@ -86,6 +87,7 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 		return nil, err
 	}
 	wordListCache.Store(key, words)
+	normalizedCache.Store(key, buildNormalizedSet(words))
 	return words, nil
 }
 
@@ -289,15 +291,26 @@ func handleGuess(c *gin.Context) {
 		}
 	}
 
-	// Reject guesses not in the word list
+	// Reject guesses not in the word list; accept accent variants (e.g. "cafe" → "café")
 	words, err := getCachedWordList(game.Lang, game.WordLength)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if _, ok := words[guess]; !ok {
-		c.JSON(http.StatusOK, gin.H{"error": "Not in word list"})
-		return
+		key := fmt.Sprintf("%s:%d", game.Lang, game.WordLength)
+		if v, ok2 := normalizedCache.Load(key); ok2 {
+			normSet := v.(map[string]string)
+			if canonical, ok3 := normSet[normalizeWord(guess)]; ok3 {
+				guess = canonical // use the accented form for evaluation
+			} else {
+				c.JSON(http.StatusOK, gin.H{"error": "Not in word list"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusOK, gin.H{"error": "Not in word list"})
+			return
+		}
 	}
 
 	// Evaluate
