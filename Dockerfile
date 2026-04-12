@@ -5,6 +5,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o wordle .
 
 FROM scratch
 WORKDIR /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/wordle .
 COPY static/ ./static/
 EXPOSE 8080
