@@ -230,7 +230,7 @@ function startProgressPolling(lang, length) {
       const { count } = await api.progress(lang, length);
       if (el && count > 0) el.textContent = `${count.toLocaleString()} words found so far…`;
     } catch (_) {}
-  }, 400);
+  }, 60000);
 }
 function stopProgressPolling() {
   clearInterval(_progressTimer);
