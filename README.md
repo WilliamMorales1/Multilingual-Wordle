@@ -1,6 +1,6 @@
 # Multilingual Wordle with Go
 
-A multilingual Wordle game written in Go that works with **any language** on kaikki.org — Latin, Cyrillic, Arabic, Japanese, Korean, Greek, Hebrew, Thai, and more.
+A multilingual Wordle game written in Go that works with **any language** on kaikki.org — English, Spanish, French, Russian, Arabic, Greek, Hebrew, Thai, and more.
 
 ## Features
 
@@ -14,7 +14,6 @@ A multilingual Wordle game written in Go that works with **any language** on kai
 
 - Word data from [kaikki.org](https://kaikki.org/) (Wiktionary wiktextract dumps)
 - Inspired by Josh Wardle's Wordle
-- Go port of the Python multilingual Wordle
 
 ## License
 

@@ -10,8 +10,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
@@ -85,20 +87,25 @@ func isValid(word string, length int) bool {
 	return true
 }
 
-// kaikkiURL constructs the URL for a language's word dump
+// kaikkiURL constructs the URL for a language's word dump.
+// Directory uses %20 for spaces; filename has spaces stripped entirely.
+// e.g. "Old English" → /dictionary/Old%20English/kaikki.org-dictionary-OldEnglish.jsonl.gz
 func kaikkiURL(lang string) string {
-	slug := url.QueryEscape(lang)
-	return fmt.Sprintf("https://kaikki.org/dictionary/%s/kaikki.org-dictionary-%s.jsonl.gz", slug, slug)
+	slug := strings.ReplaceAll(lang, " ", "")
+	u := &url.URL{
+		Scheme: "https",
+		Host:   "kaikki.org",
+		Path:   fmt.Sprintf("/dictionary/%s/kaikki.org-dictionary-%s.jsonl.gz", lang, slug),
+	}
+	return u.String()
 }
 
-// cachePath returns the path to the cache file
+// cachePath returns the path to the per-language, per-length cache file.
 func cachePath(lang string, length int) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
 	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
-	return filepath.Join(home, fmt.Sprintf(".wordle_%s_%dl_cache.json", safe, length))
+	dir := dataPath("cache")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, fmt.Sprintf("%s_%dl.json", safe, length))
 }
 
 // firstGloss extracts the first definition from a kaikki entry
@@ -113,10 +120,10 @@ func firstGloss(entry KaikkiEntry) string {
 	return ""
 }
 
-// streamURL downloads and processes a gzipped JSONL file
-func streamURL(rawURL, lang string, length int) (map[string]string, error) {
-	words := make(map[string]string)
-
+// streamURL downloads words of the given length for a language from a gzipped JSONL file.
+// Parsing is parallelised across workers while the scanner streams the download.
+// onProgress is called with the running word count every 500 words (may be nil).
+func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[string]string, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, err
@@ -133,56 +140,98 @@ func streamURL(rawURL, lang string, length int) (map[string]string, error) {
 	}
 	defer gz.Close()
 
-	scanner := bufio.NewScanner(gz)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 16*1024*1024) // 16 MB — large Wiktionary entries can exceed 1 MB
+	type result struct{ word, def string }
 
-	for scanner.Scan() {
-		var entry KaikkiEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
+	numWorkers := runtime.NumCPU()
+	lines   := make(chan []byte, numWorkers*8)
+	results := make(chan result,  numWorkers*8)
 
-		if entry.Lang != lang {
-			continue
-		}
-		if !isValid(entry.Word, length) {
-			continue
-		}
-		if len(entry.Senses) == 0 {
-			continue
-		}
+	// Workers: parse JSON and filter in parallel.
+	var wg sync.WaitGroup
+	for range numWorkers {
+		wg.Go(func() {
+			for line := range lines {
+				var entry KaikkiEntry
+				if json.Unmarshal(line, &entry) != nil {
+					continue
+				}
+				if entry.Lang != lang || len(entry.Senses) == 0 {
+					continue
+				}
+				if !isValid(entry.Word, length) {
+					continue
+				}
+				results <- result{strings.ToLower(entry.Word), firstGloss(entry)}
+			}
+		})
+	}
 
-		key := strings.ToLower(entry.Word)
-		if _, exists := words[key]; !exists {
-			words[key] = firstGloss(entry)
-		}
+	// Close results once all workers finish.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
+	// Scanner feeds raw line bytes to workers.
+	var scanErr error
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(gz)
+		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			b := make([]byte, len(scanner.Bytes()))
+			copy(b, scanner.Bytes())
+			lines <- b
+		}
+		scanErr = scanner.Err()
+	}()
+
+	// Collect results on the main goroutine.
+	words := make(map[string]string)
+	for r := range results {
+		if _, exists := words[r.word]; !exists {
+			words[r.word] = r.def
+		}
 		if len(words)%500 == 0 {
 			log.Printf("  %d words collected...", len(words))
+			if onProgress != nil {
+				onProgress(len(words))
+			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		// A single oversized line (token too long) or a truncated stream should not
-		// discard the thousands of words already collected.  Return what we have as
-		// long as it's a usable sample; only fail hard if we got almost nothing.
+	if scanErr != nil {
 		if len(words) >= 20 {
-			log.Printf("Warning: scanner error after %d words (%v) — using partial results", len(words), err)
+			log.Printf("Warning: scanner error after %d words (%v) — using partial results", len(words), scanErr)
 			return words, nil
 		}
-		return nil, err
+		return nil, scanErr
 	}
 
 	return words, nil
 }
 
-// streamKaikki downloads word list from kaikki.org
-func streamKaikki(lang string, length int) (map[string]string, error) {
+// loadWordList loads words of the given length from disk cache, or downloads
+// and caches them from kaikki.org if not present.
+func loadWordList(lang string, length int) (map[string]string, error) {
+	cf := cachePath(lang, length)
+
+	if data, err := os.ReadFile(cf); err == nil {
+		var cached map[string]string
+		if err := json.Unmarshal(data, &cached); err == nil && len(cached) >= 20 {
+			log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lang, length, filepath.Base(cf))
+			return cached, nil
+		}
+	}
+
 	u := kaikkiURL(lang)
 	log.Printf("Downloading %s wiktextract dump from %s", lang, u)
 
-	words, err := streamURL(u, lang, length)
+	key := fmt.Sprintf("%s:%d", lang, length)
+	words, err := streamURL(u, lang, length, func(n int) {
+		downloadProgress.Store(key, n)
+	})
+	downloadProgress.Delete(key)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
 			return nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lang)
@@ -190,30 +239,11 @@ func streamKaikki(lang string, length int) (map[string]string, error) {
 		return nil, err
 	}
 
-	log.Printf("%d %s %d-character words collected", len(words), lang, length)
-	return words, nil
-}
-
-// loadWordList loads from disk cache or downloads from kaikki.org
-func loadWordList(lang string, length int) (map[string]string, error) {
-	cf := cachePath(lang, length)
-
-	if data, err := os.ReadFile(cf); err == nil {
-		var cached map[string]string
-		if err := json.Unmarshal(data, &cached); err == nil && len(cached) >= 20 {
-			log.Printf("Loaded %d words from cache (%s)", len(cached), filepath.Base(cf))
-			return cached, nil
-		}
-	}
-
-	words, err := streamKaikki(lang, length)
-	if err != nil {
-		return nil, err
-	}
-
 	if len(words) == 0 {
 		return nil, fmt.Errorf("no %d-character %s words found", length, lang)
 	}
+
+	log.Printf("%d %s %d-letter words collected", len(words), lang, length)
 
 	if data, err := json.Marshal(words); err == nil {
 		if err := os.WriteFile(cf, data, 0644); err == nil {

@@ -6,6 +6,8 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +20,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// dataPath returns a path inside DATA_DIR (defaults to "." for local dev).
+func dataPath(name string) string {
+	dir := os.Getenv("DATA_DIR")
+	if dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, name)
+}
+
 // ----------------------------------------------------------------------------
 // Global state
 // ----------------------------------------------------------------------------
@@ -29,6 +40,8 @@ var (
 
 	langCacheMu sync.RWMutex
 	langCache   []string // sorted language names, populated on first request
+
+	downloadProgress sync.Map // key: "lang:length" → int (words collected so far)
 )
 
 // ----------------------------------------------------------------------------
@@ -37,7 +50,7 @@ var (
 
 func initDB() {
 	var err error
-	db, err = gorm.Open(sqlite.Open("wordle.db"), &gorm.Config{
+	db, err = gorm.Open(sqlite.Open(dataPath("wordle.db")), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -443,6 +456,18 @@ func handleGetLanguages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"languages": langs})
 }
 
+// GET /api/progress?lang=X&length=Y
+func handleGetProgress(c *gin.Context) {
+	lang := c.Query("lang")
+	length, _ := strconv.Atoi(c.Query("length"))
+	key := fmt.Sprintf("%s:%d", lang, length)
+	count := 0
+	if v, ok := downloadProgress.Load(key); ok {
+		count = v.(int)
+	}
+	c.JSON(http.StatusOK, gin.H{"count": count})
+}
+
 // ----------------------------------------------------------------------------
 // main
 // ----------------------------------------------------------------------------
@@ -453,7 +478,13 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// Serve the frontend
+	// Serve the frontend — no-cache so browsers always fetch fresh files after a deploy
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/static/") || c.Request.URL.Path == "/" {
+			c.Header("Cache-Control", "no-cache")
+		}
+		c.Next()
+	})
 	r.Static("/static", "./static")
 	r.StaticFile("/", "./static/index.html")
 
@@ -461,6 +492,7 @@ func main() {
 	api := r.Group("/api")
 	{
 		api.GET("/languages", handleGetLanguages)
+		api.GET("/progress", handleGetProgress)
 		api.POST("/game", handleNewGame)
 		api.GET("/game/:id", handleGetGame)
 		api.POST("/game/:id/guess", handleGuess)

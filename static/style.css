@@ -183,7 +183,8 @@ header h1 {
     justify-content: center;
 }
 .key:active { opacity: 0.75; }
-.key.wide { width: var(--key-wide-width, 65px); font-size: 0.75rem; }
+.key.wide { width: var(--key-wide-width, 65px); }
+#enter-key { font-size: 0.9rem; }
 .key.correct { background: var(--correct); color: #fff; }
 .key.present { background: var(--present); color: #fff; }
 .key.absent  { background: var(--absent);  color: #fff; }
@@ -254,6 +255,28 @@ header h1 {
     border-color: var(--subtext);
 }
 
+/* ── Language dropdown ────────────────────────────────────── */
+.lang-dropdown { position: relative; }
+.lang-options {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    z-index: 200;
+}
+.lang-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.lang-option:hover,
+.lang-option.active { background: var(--border); }
+
 /* ── Buttons ──────────────────────────────────────────────── */
 .btn-primary {
     width: 100%;
@@ -280,7 +303,10 @@ header h1 {
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
-    font-size: 0.9rem;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     cursor: pointer;
     transition: background 0.15s;
 }

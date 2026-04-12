@@ -191,10 +191,24 @@ const S = {
 
 // ── API ──────────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
-  const r = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const method = opts.method || 'GET';
+  console.log(`[api] ${method} ${path}`, opts.body ? JSON.parse(opts.body) : '');
+  const t0 = performance.now();
+  let r;
+  try {
+    r = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+    });
+  } catch (e) {
+    console.error(`[api] ${method} ${path} — network error after ${((performance.now()-t0)/1000).toFixed(1)}s:`, e);
+    throw e;
+  }
+  const ms = ((performance.now() - t0) / 1000).toFixed(1);
+  console.log(`[api] ${method} ${path} → HTTP ${r.status} (${ms}s)`);
+  if (!r.ok) {
+    console.error(`[api] HTTP ${r.status} body:`, await r.clone().text());
+  }
   return r.json();
 }
 
@@ -203,7 +217,27 @@ const api = {
   newGame:   (b)           => apiFetch('/api/game', { method: 'POST', body: JSON.stringify(b) }),
   guess:     (id, word)    => apiFetch(`/api/game/${id}/guess`, { method: 'POST', body: JSON.stringify({ word }) }),
   stats:     (lang, len)   => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
+  progress:  (lang, len)   => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
 };
+
+// ── Download progress polling ─────────────────────────────────────────────────
+let _progressTimer = null;
+function startProgressPolling(lang, length) {
+  const el = document.getElementById('loading-count');
+  if (el) el.textContent = '';
+  _progressTimer = setInterval(async () => {
+    try {
+      const { count } = await api.progress(lang, length);
+      if (el && count > 0) el.textContent = `${count.toLocaleString()} words found so far…`;
+    } catch (_) {}
+  }, 400);
+}
+function stopProgressPolling() {
+  clearInterval(_progressTimer);
+  _progressTimer = null;
+  const el = document.getElementById('loading-count');
+  if (el) el.textContent = '';
+}
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer = null;
@@ -361,7 +395,9 @@ function buildKeyboard(alphabet, lang) {
 
     // Enter left of bottom row, ⌫ right of bottom row (like a physical keyboard's Z/M flanks)
     if (idx === rows.length - 1) {
-      rowEl.insertBefore(makeKey('Enter', 'wide', onEnter), rowEl.firstChild);
+      const enterBtn = makeKey('Enter', 'wide', onEnter);
+      enterBtn.id = 'enter-key';
+      rowEl.insertBefore(enterBtn, rowEl.firstChild);
       if (currentOverflowBases.size > 0) {
         const starBtn = makeKey('*', '', () => onKeyPress('*'));
         starBtn.id = 'star-key';
@@ -518,10 +554,13 @@ async function startGame() {
   document.getElementById('board').style.display   = 'none';
   document.getElementById('keyboard').style.display = 'none';
 
+  startProgressPolling(lang, length);
+
   let result;
   try {
     result = await api.newGame({ lang, length, max_guesses: maxGuesses });
   } catch (e) {
+    stopProgressPolling();
     toast('Network error — could not start game');
     S.status = 'idle';
     document.getElementById('loading').style.display = 'none';
@@ -529,6 +568,7 @@ async function startGame() {
     return;
   }
 
+  stopProgressPolling();
   document.getElementById('loading').style.display = 'none';
 
   if (result.error) {
@@ -625,15 +665,60 @@ document.getElementById('equiv-close').addEventListener('click', () => {
   document.getElementById('equiv-notice').hidden = true;
 });
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-(async function init() {
-  // Populate language datalist in the background
-  api.languages().then(data => {
-    const dl = document.getElementById('langList');
-    (data.languages || []).forEach(name => {
-      const opt = document.createElement('option');
-      opt.value = name;
-      dl.appendChild(opt);
+// ── Language dropdown ─────────────────────────────────────────────────────────
+(async function initLangDropdown() {
+  const input   = document.getElementById('langInput');
+  const options = document.getElementById('langOptions');
+  if (!input || !options) return; // stale cached HTML — bail out gracefully
+  let allLangs  = [];
+  let activeIdx = -1;
+
+  try {
+    const data = await api.languages();
+    allLangs = data.languages || [];
+  } catch (e) {}
+
+  function render(filter) {
+    const q = filter.trim().toLowerCase();
+    const matches = q ? allLangs.filter(l => l.toLowerCase().includes(q)) : allLangs;
+    options.innerHTML = '';
+    activeIdx = -1;
+    matches.forEach(lang => {
+      const div = document.createElement('div');
+      div.className = 'lang-option';
+      div.textContent = lang;
+      div.addEventListener('mousedown', e => { e.preventDefault(); select(lang); });
+      options.appendChild(div);
     });
-  }).catch(() => {});
+    options.hidden = matches.length === 0;
+  }
+
+  function select(lang) {
+    input.value = lang;
+    options.hidden = true;
+    activeIdx = -1;
+  }
+
+  function setActive(idx) {
+    const opts = options.querySelectorAll('.lang-option');
+    opts.forEach(o => o.classList.remove('active'));
+    activeIdx = Math.max(0, Math.min(idx, opts.length - 1));
+    if (opts[activeIdx]) {
+      opts[activeIdx].classList.add('active');
+      opts[activeIdx].scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  input.addEventListener('focus', () => render(input.value));
+  input.addEventListener('input', () => render(input.value));
+  input.addEventListener('blur',  () => setTimeout(() => { options.hidden = true; }, 150));
+
+  input.addEventListener('keydown', e => {
+    const opts = options.querySelectorAll('.lang-option');
+    if (options.hidden || opts.length === 0) return;
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setActive(activeIdx + 1); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(activeIdx - 1); }
+    else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); select(opts[activeIdx].textContent); }
+    else if (e.key === 'Escape') { options.hidden = true; }
+  });
 })();

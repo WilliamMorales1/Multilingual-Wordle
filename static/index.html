@@ -33,6 +33,7 @@
     <div id="loading">
       <div class="spinner"></div>
       <p>Loading word list&hellip;<br>This may take a minute for new languages.</p>
+      <p id="loading-count"></p>
     </div>
     <div id="board"></div>
   </div>
@@ -46,8 +47,10 @@
       <h2>New Game</h2>
       <div class="setting">
         <label for="langInput">Language</label>
-        <input id="langInput" type="text" value="English" list="langList" autocomplete="off" />
-        <datalist id="langList"></datalist>
+        <div class="lang-dropdown">
+          <input id="langInput" type="text" value="English" autocomplete="off" />
+          <div id="langOptions" class="lang-options" hidden></div>
+        </div>
       </div>
       <div class="setting">
         <label for="lengthInput">Word Length (2&ndash;20)</label>
