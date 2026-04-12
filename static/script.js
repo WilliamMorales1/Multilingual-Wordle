@@ -1,11 +1,8 @@
-// ── Accent normalization ──────────────────────────────────────────────────────
-// Mirrors normalizeChar() in wordle.go.  Maps é→e, ñ→n, ü→u, etc.
+let overflowBases = new Set();
+
 function stripDiacritics(s) {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
-
-// Add this global variable at the top of your file to store the current overflow bases
-let overflowBases = new Set();
 
 /**
  * Normalizes characters: é -> e, and redirects all unplaced characters to '*'
@@ -133,7 +130,6 @@ function buildKeyboardRows(alphabet, lang) {
   return { rows: rows.length > 0 ? rows : null, overflowBases };
 }
 
-// Return groups of equivalent chars: only groups with > 1 member (i.e. has variants).
 // Return groups of equivalent chars: groups with > 1 member OR the wildcard '*' group.
 function computeEquivalences(alphabet) {
   if (!alphabet || alphabet.length === 0) return [];
@@ -150,13 +146,10 @@ function computeEquivalences(alphabet) {
   return Object.entries(groups)
     .filter(([base, chars]) => chars.size > 1 || base === '*')
     .map(([base, chars]) => {
-      const arr = [...chars].sort((a, b) => {
-        // The base (or '*') always comes first in the array
-        if (a === base) return -1;
-        if (b === base) return 1;
-        return a.localeCompare(b);
-      });
-      return arr; // [base, variant1, variant2, ...]
+      // '*' is never in the alphabet itself, so add it explicitly as the label
+      const members = base === '*' ? ['*', ...[...chars].sort((a, b) => a.localeCompare(b))]
+                                   : [...chars].sort((a, b) => a === base ? -1 : b === base ? 1 : a.localeCompare(b));
+      return members; // [base/label, variant1, variant2, ...]
     })
     .sort((a, b) => {
       // Keep '*' at the top of the list for visibility, otherwise sort alphabetically
@@ -193,6 +186,7 @@ const S = {
   input:        [],       // []string  — current typing buffer (grapheme units)
   charStates:   {},       // char → 'correct' | 'present' | 'absent'
   lastAttempt:  0,        // winning attempt number (for dist highlight)
+  rtl:          false,    // true for Arabic, Hebrew, etc.
 };
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -244,6 +238,7 @@ function buildBoard() {
     row.className = 'board-row';
     row.id = `row-${r}`;
     row.style.gridTemplateColumns = `repeat(${S.wordLength}, 1fr)`;
+    if (S.rtl) row.dir = 'rtl';
 
     for (let c = 0; c < S.wordLength; c++) {
       const tile = document.createElement('div');
@@ -321,26 +316,40 @@ function buildKeyboard(alphabet, lang) {
   const kb = document.getElementById('keyboard');
   kb.innerHTML = '';
 
-  const { rows, overflowBases  } = buildKeyboardRows(alphabet, lang);
-  
-  // Update global state so computeEquivalences() knows what to group under '*'
-  overflowEquivalents = overflowBases;
-  currentOverflowBases = overflowBases;
+  const { rows, overflowBases: newOverflowBases } = buildKeyboardRows(alphabet, lang);
+
+  // Update global so getEquivalentBase() and the * key check both see the new value
+  overflowBases = newOverflowBases;
+  const currentOverflowBases = newOverflowBases;
 
   if (!rows) {
     kb.innerHTML = '<div id="no-keyboard">Type your guess and press <strong>Enter</strong>.</div>';
     return;
   }
 
-  const maxLen    = Math.max(...rows.map(r => r.length));
+  const GAP = 5;
   const available = Math.min(500, window.innerWidth - 16) - 16;
-  const keyW      = Math.max(24, Math.min(52, Math.floor((available - (maxLen - 1) * 5) / maxLen)));
-  const wideKeyW  = Math.max(52, Math.round(keyW * 1.5));
+  const hasOverflow = currentOverflowBases.size > 0;
+
+  // For each row, solve for the keyW that exactly fills available width.
+  // Wide keys (⌫, Enter) count as 1.5 regular-key units.
+  // Last row gets Enter (wide, left) + letters + optionally * (regular) + ⌫ (wide, right).
+  const keyWPerRow = rows.map((rowChars, idx) => {
+    let regular = rowChars.length;
+    let wide = 0;
+    if (idx === rows.length - 1) { wide += 2; if (hasOverflow) regular += 1; }
+    const totalKeys = regular + wide;
+    const units     = regular + 1.5 * wide;
+    return Math.floor((available - (totalKeys - 1) * GAP) / units);
+  });
+  const keyW     = Math.max(24, Math.min(52, Math.min(...keyWPerRow)));
+  const wideKeyW = Math.max(52, Math.round(keyW * 1.5));
   document.documentElement.style.setProperty('--key-width',      keyW     + 'px');
   document.documentElement.style.setProperty('--key-wide-width', wideKeyW + 'px');
 
-  for (const rowChars of rows) {
+  rows.forEach((rowChars, idx) => {
     const rowEl = newKeyRow();
+
     for (const char of rowChars) {
       const btn = document.createElement('button');
       btn.className = 'key';
@@ -349,22 +358,20 @@ function buildKeyboard(alphabet, lang) {
       btn.addEventListener('pointerdown', e => { e.preventDefault(); onKeyPress(char); });
       rowEl.appendChild(btn);
     }
+
+    // Enter left of bottom row, ⌫ right of bottom row (like a physical keyboard's Z/M flanks)
+    if (idx === rows.length - 1) {
+      rowEl.insertBefore(makeKey('Enter', 'wide', onEnter), rowEl.firstChild);
+      if (currentOverflowBases.size > 0) {
+        const starBtn = makeKey('*', '', () => onKeyPress('*'));
+        starBtn.id = 'star-key';
+        rowEl.appendChild(starBtn);
+      }
+      rowEl.appendChild(makeKey('⌫', 'wide', onBackspace));
+    }
+
     kb.appendChild(rowEl);
-  }
-
-  // Action row
-  const actionRow = newKeyRow();
-  actionRow.appendChild(makeKey('⌫', 'wide', onBackspace));
-  
-  // If there are overflow characters, insert the wildcard * key
-  if (currentOverflowBases.size > 0) {
-    const starBtn = makeKey('*', '', () => onKeyPress('*'));
-    starBtn.id = 'star-key';
-    actionRow.appendChild(starBtn);
-  }
-
-  actionRow.appendChild(makeKey('Enter', 'wide', onEnter));
-  kb.appendChild(actionRow);
+  });
 }
 
 function newKeyRow() {
@@ -430,10 +437,6 @@ async function onEnter() {
     S.status = 'playing';
     shakeRow(S.currentRow);
     return;
-  }
-
-  if (!result.in_word_list) {
-    toast('Not in word list', 1200);
   }
 
   const rowIdx = S.currentRow;
@@ -537,6 +540,7 @@ async function startGame() {
 
   S.gameId  = result.id;
   S.status  = 'playing';
+  S.rtl     = /[\u0600-\u06FF\u05D0-\u05EA]/.test((result.alphabet || []).join(''));
 
   document.getElementById('board').style.display   = '';
   document.getElementById('keyboard').style.display = '';
@@ -548,6 +552,8 @@ async function startGame() {
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 async function showStats(lastResult) {
+  clearTimeout(toastTimer);
+  document.getElementById('toast').classList.remove('show');
   let data;
   try {
     data = await api.stats(S.lang, S.wordLength);

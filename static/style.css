@@ -162,7 +162,7 @@ header h1 {
     justify-content: center;
     gap: 5px;
     margin-bottom: 6px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 .key {
     height: 58px;
@@ -172,7 +172,7 @@ header h1 {
     border-radius: 4px;
     background: var(--key-bg);
     color: var(--key-text);
-    font-size: 0.8rem;
+    font-size: calc(var(--tile-size) * 0.42);
     font-weight: 700;
     text-transform: uppercase;
     cursor: pointer;

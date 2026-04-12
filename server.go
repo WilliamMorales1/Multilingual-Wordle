@@ -276,6 +276,17 @@ func handleGuess(c *gin.Context) {
 		}
 	}
 
+	// Reject guesses not in the word list
+	words, err := getCachedWordList(game.Lang, game.WordLength)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if _, ok := words[guess]; !ok {
+		c.JSON(http.StatusOK, gin.H{"error": "Not in word list"})
+		return
+	}
+
 	// Evaluate
 	answerChars := wordChars(game.Answer)
 	states := evaluate(guessChars, answerChars)
@@ -293,11 +304,7 @@ func handleGuess(c *gin.Context) {
 		return
 	}
 
-	// Check word list membership (informational only)
-	inWordList := false
-	if words, err := getCachedWordList(game.Lang, game.WordLength); err == nil {
-		_, inWordList = words[guess]
-	}
+	const inWordList = true
 
 	// Update game status
 	// Win if every tile is correct (accent-insensitive, derived from evaluate).
