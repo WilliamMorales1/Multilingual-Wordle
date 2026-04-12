@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multilingual Wordle</title>
+  <link href="/static/style.css" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div style="width:60px"></div>
+    <h1>Wordle</h1>
+    <div class="header-btns">
+      <button class="icon-btn" id="statsBtn" title="Statistics">&#x1F4CA;</button>
+      <button class="icon-btn" id="settingsBtn" title="New Game">&#x2699;&#xFE0F;</button>
+    </div>
+  </header>
+
+  <!-- Character-equivalence notice (shown after word list loads) -->
+  <div id="equiv-notice" hidden>
+    <span class="equiv-heading">Accents ignored:&nbsp;</span>
+    <span id="equiv-list"></span>
+    <button id="equiv-close" title="Dismiss">&times;</button>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
+
+  <!-- Board -->
+  <div id="board-wrap">
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>Loading word list&hellip;<br>This may take a minute for new languages.</p>
+    </div>
+    <div id="board"></div>
+  </div>
+
+  <!-- Keyboard -->
+  <div id="keyboard"></div>
+
+  <!-- Settings / New Game modal -->
+  <div class="modal open" id="settingsModal">
+    <div class="modal-box">
+      <h2>New Game</h2>
+      <div class="setting">
+        <label for="langInput">Language</label>
+        <input id="langInput" type="text" value="English" list="langList" autocomplete="off" />
+        <datalist id="langList"></datalist>
+      </div>
+      <div class="setting">
+        <label for="lengthInput">Word Length (2&ndash;20)</label>
+        <input id="lengthInput" type="number" min="2" max="20" value="5" />
+      </div>
+      <div class="setting">
+        <label for="guessesInput">Max Guesses (1&ndash;30)</label>
+        <input id="guessesInput" type="number" min="1" max="30" value="6" />
+      </div>
+      <button class="btn-primary" id="startBtn">Start Game</button>
+    </div>
+  </div>
+
+  <!-- Stats modal -->
+  <div class="modal" id="statsModal">
+    <div class="modal-box">
+      <h2>Statistics</h2>
+      <div class="stats-row">
+        <div class="stat-box"><div class="num" id="stat-played">0</div><div class="lbl">Played</div></div>
+        <div class="stat-box"><div class="num" id="stat-win-pct">0</div><div class="lbl">Win %</div></div>
+        <div class="stat-box"><div class="num" id="stat-streak">0</div><div class="lbl">Streak</div></div>
+        <div class="stat-box"><div class="num" id="stat-max-streak">0</div><div class="lbl">Best</div></div>
+      </div>
+      <div class="dist-section">
+        <h3>Guess Distribution</h3>
+        <div id="distContainer"></div>
+      </div>
+      <div id="definition">
+        <div class="def-word" id="defWord"></div>
+        <div class="def-text" id="defText"></div>
+      </div>
+      <button class="btn-primary" id="newGameFromStats">New Game</button>
+      <button class="btn-secondary" id="closeStats">Close</button>
+    </div>
+  </div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

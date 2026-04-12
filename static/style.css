@@ -1,0 +1,411 @@
+/* ── Reset ────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Variables ────────────────────────────────────────────── */
+:root {
+    --bg:        #121213;
+    --surface:   #1a1a1b;
+    --border:    #3a3a3c;
+    --text:      #ffffff;
+    --subtext:   #818384;
+    --correct:   #538d4e;
+    --present:   #b59f3b;
+    --absent:    #3a3a3c;
+    --key-bg:    #818384;
+    --key-text:  #ffffff;
+    --tile-size: 62px;
+    --gap:        5px;
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100svh;
+    overflow-x: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+header {
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+header h1 {
+    font-size: 1.7rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+.header-btns { display: flex; gap: 8px; }
+.icon-btn {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+.icon-btn:hover { background: var(--border); }
+
+/* ── Toast ────────────────────────────────────────────────── */
+#toast {
+    position: fixed;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text);
+    color: var(--bg);
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 100;
+    white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+
+/* ── Board ────────────────────────────────────────────────── */
+#board-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0 10px;
+}
+#board {
+    display: grid;
+    gap: var(--gap);
+}
+.board-row {
+    display: grid;
+    gap: var(--gap);
+}
+
+/* ── Tile ─────────────────────────────────────────────────── */
+.tile {
+    width: var(--tile-size);
+    height: var(--tile-size);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(var(--tile-size) * 0.42);
+    font-weight: 700;
+    text-transform: uppercase;
+    user-select: none;
+    transition: border-color 0.05s;
+}
+.tile.filled { border-color: var(--subtext); }
+
+/* revealed states (added after flip) */
+.tile.correct { background: var(--correct); border-color: var(--correct); color: #fff; }
+.tile.present { background: var(--present); border-color: var(--present); color: #fff; }
+.tile.absent  { background: var(--absent);  border-color: var(--absent);  color: #fff; }
+
+/* ── Flip animation ───────────────────────────────────────── */
+@keyframes tile-flip {
+    0%   { transform: scaleY(1); }
+    49%  { transform: scaleY(0); }
+    50%  { transform: scaleY(0); }
+    100% { transform: scaleY(1); }
+}
+.tile.flipping { animation: tile-flip 0.5s ease forwards; }
+
+/* ── Shake animation ──────────────────────────────────────── */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%       { transform: translateX(-4px); }
+    40%       { transform: translateX(4px); }
+    60%       { transform: translateX(-4px); }
+    80%       { transform: translateX(2px); }
+}
+.board-row.shake { animation: shake 0.5s ease; }
+
+/* ── Bounce animation (win) ───────────────────────────────── */
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    40%       { transform: translateY(-20px); }
+    60%       { transform: translateY(-10px); }
+}
+.tile.bounce { animation: bounce 0.6s ease; }
+
+/* ── Pop animation (typing) ───────────────────────────────── */
+@keyframes pop {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+.tile.pop { animation: pop 0.1s ease; }
+
+/* ── Keyboard ─────────────────────────────────────────────── */
+#keyboard {
+    width: 100%;
+    max-width: 500px;
+    padding: 0 8px 16px;
+}
+.key-row {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+.key {
+    height: 58px;
+    width: var(--key-width, 43px);
+    padding: 0 4px;
+    border: none;
+    border-radius: 4px;
+    background: var(--key-bg);
+    color: var(--key-text);
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.key:active { opacity: 0.75; }
+.key.wide { width: var(--key-wide-width, 65px); font-size: 0.75rem; }
+.key.correct { background: var(--correct); color: #fff; }
+.key.present { background: var(--present); color: #fff; }
+.key.absent  { background: var(--absent);  color: #fff; }
+#no-keyboard {
+    text-align: center;
+    color: var(--subtext);
+    font-size: 0.85rem;
+    padding: 12px 0;
+}
+
+/* ── Modal backdrop ───────────────────────────────────────── */
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 50;
+    align-items: center;
+    justify-content: center;
+}
+.modal.open { display: flex; }
+
+/* ── Modal box ────────────────────────────────────────────── */
+.modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 24px;
+    width: min(420px, 92vw);
+    max-height: 90svh;
+    overflow-y: auto;
+}
+.modal-box h2 {
+    text-align: center;
+    font-size: 1.1rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ── Settings form ────────────────────────────────────────── */
+.setting {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+.setting label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--subtext);
+}
+.setting input[type="text"],
+.setting input[type="number"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 1rem;
+    width: 100%;
+}
+.setting input:focus {
+    outline: none;
+    border-color: var(--subtext);
+}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+.btn-primary {
+    width: 100%;
+    padding: 12px;
+    margin-top: 6px;
+    background: var(--correct);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.85; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary {
+    width: 100%;
+    padding: 10px;
+    margin-top: 8px;
+    background: none;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.btn-secondary:hover { background: var(--border); }
+
+/* ── Stats layout ─────────────────────────────────────────── */
+.stats-row {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.stat-box {
+    text-align: center;
+    min-width: 60px;
+}
+.stat-box .num {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.stat-box .lbl {
+    font-size: 0.65rem;
+    color: var(--subtext);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 4px;
+}
+
+/* ── Distribution ─────────────────────────────────────────── */
+.dist-section h3 {
+    text-align: center;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--subtext);
+    margin-bottom: 12px;
+}
+.dist-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    font-size: 0.85rem;
+}
+.dist-label { width: 16px; text-align: right; font-weight: 700; }
+.dist-fill {
+    background: var(--absent);
+    min-width: 28px;
+    padding: 2px 8px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-align: right;
+    transition: width 0.5s ease;
+}
+.dist-fill.highlight { background: var(--correct); }
+
+/* ── Definition reveal ────────────────────────────────────── */
+#definition {
+    margin-top: 16px;
+    padding: 12px;
+    background: var(--bg);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    display: none;
+}
+#definition .def-word {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+}
+#definition .def-text { color: var(--subtext); }
+
+/* ── Equivalence notice ───────────────────────────────────── */
+#equiv-notice {
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 3px 6px;
+    padding: 7px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--subtext);
+    line-height: 1.6;
+}
+#equiv-notice[hidden] { display: none; }
+#equiv-notice .equiv-heading {
+    color: var(--subtext);
+    white-space: nowrap;
+}
+#equiv-notice .equiv-group strong { color: var(--text); }
+#equiv-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--subtext);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+#equiv-close:hover { color: var(--text); }
+
+/* ── Loading spinner ──────────────────────────────────────── */
+#loading {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 40px 0;
+}
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border);
+    border-top-color: var(--correct);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading p { color: var(--subtext); font-size: 0.85rem; text-align: center; }
