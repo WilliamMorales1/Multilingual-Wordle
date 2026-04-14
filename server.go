@@ -508,6 +508,7 @@ func main() {
 	})
 	r.Static("/static", "./static")
 	r.StaticFile("/", "./static/index.html")
+	r.StaticFile("/favicon.ico", "./favicon.ico")
 
 	// API
 	api := r.Group("/api")
