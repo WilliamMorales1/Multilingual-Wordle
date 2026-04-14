@@ -1,172 +1,16 @@
-let overflowBases = new Set();
-
 function stripDiacritics(s) {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-/**
- * Normalizes characters: é -> e, and redirects all unplaced characters to '*'
- */
-function getEquivalentBase(char) {
-  if (char === '*') return '*';
-  const base = stripDiacritics(char);
-  // If the character's base wasn't placed on a standard key, it belongs to '*'
-  if (overflowBases.has(base)) return '*';
-  return base;
-}
-
-// ── Keyboard layout tables ────────────────────────────────────────────────────
-// Each row is an array of *base* (diacritic-free) characters in keyboard order.
-const LAYOUTS = {
-  qwerty:  [['q','w','e','r','t','y','u','i','o','p'],
-            ['a','s','d','f','g','h','j','k','l'],
-            ['z','x','c','v','b','n','m']],
-  azerty:  [['a','z','e','r','t','y','u','i','o','p'],
-            ['q','s','d','f','g','h','j','k','l','m'],
-            ['w','x','c','v','b','n']],
-  qwertz:  [['q','w','e','r','t','z','u','i','o','p'],
-            ['a','s','d','f','g','h','j','k','l'],
-            ['y','x','c','v','b','n','m']],
-  nordic:  [['q','w','e','r','t','y','u','i','o','p','å'],
-            ['a','s','d','f','g','h','j','k','l','ø','æ'],
-            ['z','x','c','v','b','n','m']],
-  turkish: [['q','w','e','r','t','y','u','ı','o','p','ğ','ü'],
-            ['a','s','d','f','g','h','j','k','l','ş','i'],
-            ['z','x','c','v','b','n','m','ö','ç']],
-  jcuken:  [['й','ц','у','к','е','н','г','ш','щ','з','х'],
-            ['ф','ы','в','а','п','р','о','л','д','ж','э'],
-            ['я','ч','с','м','и','т','ь','б','ю']],
-  greek:   [['ε','ρ','τ','υ','θ','ι','ο','π'],
-            ['α','σ','δ','φ','γ','η','ξ','κ','λ'],
-            ['ζ','χ','ψ','ω','β','ν','μ']],
-  arabic:  [['ض','ص','ث','ق','ف','غ','ع','ه','خ','ح','ج','د'],
-            ['ش','س','ي','ب','ل','ا','ت','ن','م','ك','ط','ذ'],
-            ['ئ','ء','ؤ','ر','ى','ة','و','ز','ظ']],
-  hebrew:  [['ק','ר','א','ט','ו','ן','ם','פ'],
-            ['ש','ד','ג','כ','ע','י','ח','ל','ך','ף'],
-            ['ז','ס','ב','ה','נ','צ','ת','ץ']],
-  // InScript standard mapped roughly to standard rows
-  devanagari:[['औ','ऐ','आ','ई','ऊ','भ','ङ','घ','ध','झ','ढ','ञ'],
-              ['ओ','ए','अ','इ','उ','ब','ह','ग','द','ज','ड','श'],
-              ['ऑ','ृ','र','क','त','च','ट','प','य','स','म','व','ल','ष','न']],
-  bengali: [['ঔ','ঐ','আ','ঈ','ঊ','ভ','ঙ','ঘ','ধ','ঝ','ঢ','ঞ'],
-            ['ও','এ','অ','ই','উ','ব','হ','গ','দ','জ','ড','শ'],
-            ['ঋ','র','ক','ত','চ','ট','প','য','স','ম','ব','ল','ষ','ন']],
-  tamil:   [['ஔ','ஐ','ஆ','ஈ','ஊ','ங','ஞ','ண','ந','ன'],
-            ['ஓ','ஏ','அ','இ','உ','க','ச','ட','த','ப','ற'],
-            ['எ','ஒ','ய','ர','ல','வ','ழ','ள','ம','ஷ','ஸ','ஹ']],
-  telugu:  [['ఔ','ఐ','ఆ','ఈ','ఊ','భ','ఙ','ఘ','ధ','ఝ','ఢ','ఞ'],
-            ['ఓ','ఏ','అ','ఇ','ఉ','బ','హ','గ','ద','జ','డ','శ'],
-            ['ఎ','ఒ','ర','క','త','చ','ట','ప','య','స','మ','వ','ల','ష','న']],
-  thai:    [['โ','ฌ','ฆ','ฏ','โ','ซ','ศ','ฮ','?','ฒ','ฬ','ฦ'],
-            ['ฟ','ห','ก','ด','เ','า','ส','ว','ง','ผ','ป','แ','อ'],
-            ['พ','ะ','ั','ร','น','ย','บ','ล','ข','ช','ต','ค','ม']],
-  hiragana:[['わ','ら','や','ま','は','な','た','さ','か','あ'],
-            ['ゐ','り','み','ひ','に','ち','し','き','い'],
-            ['ん','る','ゆ','む','ふ','ぬ','つ','す','く','う'],
-            ['ゑ','れ','め','へ','ね','て','せ','け','え'],
-            ['を','ろ','よ','も','ほ','の','と','そ','こ','お']],
-  katakana:[['ワ','ラ','ヤ','マ','ハ','ナ','タ','サ','カ','ア'],
-            ['ヰ','リ','ミ','ヒ','ニ','チ','シ','キ','イ'],
-            ['ン','ル','ユ','ム','フ','ヌ','ツ','ス','ク','ウ'],
-            ['ヱ','レ','メ','ヘ','ネ','テ','セ','ケ','エ'],
-            ['ヲ','ロ','ヨ','モ','ホ','ノ','ト','ソ','コ','オ']]
-};
-
-const LANG_LAYOUT_MAP = {
-  'French': 'azerty', 'German': 'qwertz', 'Norwegian': 'nordic', 
-  'Danish': 'nordic', 'Swedish': 'nordic', 'Turkish': 'turkish', 
-};
-
-function detectLayout(alphabet) {
-  const s = (alphabet || []).join('');
-  if (/[a-z]/.test(s)) {
-    // If it's Latin, we default to qwerty (other logic like LANG_LAYOUT_MAP 
-    // handles specific Latin variations like French/German)
-    return 'qwerty';
-  }
-
-  if (/[\u0400-\u04FF]/.test(s)) return 'jcuken';
-  if (/[\u0370-\u03FF\u1F00-\u1FFF]/.test(s)) return 'greek';
-  if (/[\u0600-\u06FF]/.test(s)) return 'arabic';
-  if (/[\u05D0-\u05EA]/.test(s)) return 'hebrew';
-  if (/[\u0900-\u097F]/.test(s)) return 'devanagari';
-  if (/[\u0980-\u09FF]/.test(s)) return 'bengali';
-  if (/[\u0B80-\u0BFF]/.test(s)) return 'tamil';
-  if (/[\u0C00-\u0C7F]/.test(s)) return 'telugu';
-  if (/[\u0E00-\u0E7F]/.test(s)) return 'thai';
-  if (/[\u3040-\u309F]/.test(s)) return 'hiragana';
-  if (/[\u30A0-\u30FF]/.test(s)) return 'katakana';
-  return 'qwerty';
-}
-
-// Build an ordered list of keyboard rows from the alphabet + layout.
-// Only BASE characters are shown (no accented variants) — the equivalence notice
-// already tells the user that E covers É, È, Ê, etc.
-function buildKeyboardRows(alphabet, lang) {
-  if (!alphabet || alphabet.length === 0) return { rows: null, overflowBases: new Set() };
-
-  const basesInAlphabet = new Set(alphabet.map(ch => stripDiacritics(ch)));
-  const layoutName = LANG_LAYOUT_MAP[lang] || detectLayout(alphabet);
-  const layout     = LAYOUTS[layoutName] || LAYOUTS.qwerty;
-
-  const placedBases = new Set();
-  const rows = [];
-
-  for (const layoutRow of layout) {
-    const row = [];
-    for (const base of layoutRow) {
-      if (basesInAlphabet.has(base)) {
-        row.push(base);
-        placedBases.add(base);
-      }
-    }
-    if (row.length > 0) rows.push(row);
-  }
-
-  // Any base chars not in the layout are classified as "overflow"
-  const overflowBases = new Set([...basesInAlphabet].filter(b => !placedBases.has(b)));
-
-  return { rows: rows.length > 0 ? rows : null, overflowBases };
-}
-
-// Return groups of equivalent chars: groups with > 1 member OR the wildcard '*' group.
-function computeEquivalences(alphabet) {
-  if (!alphabet || alphabet.length === 0) return [];
-  
-  const groups = {};
-  
-  alphabet.forEach(ch => {
-    // Use the redirected base (e.g., ॐ -> *)
-    const base = getEquivalentBase(ch);
-    if (!groups[base]) groups[base] = new Set();
-    groups[base].add(ch);
-  });
-
-  return Object.entries(groups)
-    .filter(([base, chars]) => chars.size > 1 || base === '*')
-    .map(([base, chars]) => {
-      // '*' is never in the alphabet itself, so add it explicitly as the label
-      const members = base === '*' ? ['*', ...[...chars].sort((a, b) => a.localeCompare(b))]
-                                   : [...chars].sort((a, b) => a === base ? -1 : b === base ? 1 : a.localeCompare(b));
-      return members; // [base/label, variant1, variant2, ...]
-    })
-    .sort((a, b) => {
-      // Keep '*' at the top of the list for visibility, otherwise sort alphabetically
-      if (a[0] === '*') return -1;
-      if (b[0] === '*') return 1;
-      return a[0].localeCompare(b[0]);
-    });
-}
-
-function showEquivNotice(alphabet) {
+// equivalences is the precomputed [][]string from the server:
+// each element is [base/label, variant1, variant2, ...]
+function showEquivNotice(equivalences) {
   const notice = document.getElementById('equiv-notice');
   const list   = document.getElementById('equiv-list');
-  const groups = computeEquivalences(alphabet);
 
-  if (groups.length === 0) { notice.hidden = true; return; }
+  if (!equivalences || equivalences.length === 0) { notice.hidden = true; return; }
 
-  list.innerHTML = groups.map((g, i) => {
+  list.innerHTML = equivalences.map(g => {
     const base     = g[0].toUpperCase();
     const variants = g.slice(1).map(c => c.toUpperCase()).join(', ');
     return `<span class="equiv-group"><strong>${base}</strong> = ${variants}</span>`;
@@ -290,7 +134,6 @@ function setTileText(row, col, ch) {
   t.textContent = ch ? ch.toUpperCase() : '';
   if (ch) {
     t.classList.add('filled');
-    // pop animation
     t.classList.remove('pop');
     void t.offsetWidth; // reflow
     t.classList.add('pop');
@@ -346,24 +189,20 @@ function shakeRow(rowIdx) {
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────────────
-function buildKeyboard(alphabet, lang) {
+// rows: [][]string from server (pre-computed base chars per row)
+// overflowBases: Set of base chars not on any layout key (for the '*' key)
+function buildKeyboard(rows, overflowBases) {
   const kb = document.getElementById('keyboard');
   kb.innerHTML = '';
 
-  const { rows, overflowBases: newOverflowBases } = buildKeyboardRows(alphabet, lang);
-
-  // Update global so getEquivalentBase() and the * key check both see the new value
-  overflowBases = newOverflowBases;
-  const currentOverflowBases = newOverflowBases;
-
-  if (!rows) {
+  if (!rows || rows.length === 0) {
     kb.innerHTML = '<div id="no-keyboard">Type your guess and press <strong>Enter</strong>.</div>';
     return;
   }
 
   const GAP = 5;
   const available = Math.min(500, window.innerWidth - 16) - 16;
-  const hasOverflow = currentOverflowBases.size > 0;
+  const hasOverflow = overflowBases.size > 0;
 
   // For each row, solve for the keyW that exactly fills available width.
   // Wide keys (⌫, Enter) count as 1.5 regular-key units.
@@ -398,7 +237,7 @@ function buildKeyboard(alphabet, lang) {
       const enterBtn = makeKey('Enter', 'wide', onEnter);
       enterBtn.id = 'enter-key';
       rowEl.insertBefore(enterBtn, rowEl.firstChild);
-      if (currentOverflowBases.size > 0) {
+      if (overflowBases.size > 0) {
         const starBtn = makeKey('*', '', () => onKeyPress('*'));
         starBtn.id = 'star-key';
         rowEl.appendChild(starBtn);
@@ -549,7 +388,6 @@ async function startGame() {
   S.charStates = {};
   S.gameId     = null;
 
-  // Show spinner, hide board
   document.getElementById('loading').style.display = 'flex';
   document.getElementById('board').style.display   = 'none';
   document.getElementById('keyboard').style.display = 'none';
@@ -580,14 +418,14 @@ async function startGame() {
 
   S.gameId  = result.id;
   S.status  = 'playing';
-  S.rtl     = /[\u0600-\u06FF\u05D0-\u05EA]/.test((result.alphabet || []).join(''));
+  S.rtl     = result.rtl || false;
 
   document.getElementById('board').style.display   = '';
   document.getElementById('keyboard').style.display = '';
 
   buildBoard();
-  buildKeyboard(result.alphabet, S.lang);
-  showEquivNotice(result.alphabet);
+  buildKeyboard(result.keyboard_rows || null, new Set(result.overflow_bases || []));
+  showEquivNotice(result.equivalences || []);
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -606,7 +444,6 @@ async function showStats(lastResult) {
   document.getElementById('stat-streak').textContent    = data.current_streak  ?? 0;
   document.getElementById('stat-max-streak').textContent= data.max_streak      ?? 0;
 
-  // Distribution
   const dist = data.distribution || {};
   const container = document.getElementById('distContainer');
   container.innerHTML = '';
@@ -624,7 +461,6 @@ async function showStats(lastResult) {
     container.appendChild(bar);
   }
 
-  // Definition
   const defEl = document.getElementById('definition');
   if (lastResult?.answer) {
     document.getElementById('defWord').textContent = lastResult.answer.toUpperCase();

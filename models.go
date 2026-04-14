@@ -2,7 +2,6 @@ package main
 
 import "gorm.io/gorm"
 
-// Game represents a single Wordle game session stored in the database.
 type Game struct {
 	gorm.Model
 	Lang       string        `json:"lang"`
@@ -13,7 +12,6 @@ type Game struct {
 	Guesses    []GuessRecord `json:"guesses" gorm:"foreignKey:GameID"`
 }
 
-// GuessRecord represents one guess within a game.
 type GuessRecord struct {
 	gorm.Model
 	GameID  uint   `json:"game_id"`

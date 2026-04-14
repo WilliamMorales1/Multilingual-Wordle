@@ -20,7 +20,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// dataPath returns a path inside DATA_DIR (defaults to "." for local dev).
 func dataPath(name string) string {
 	dir := os.Getenv("DATA_DIR")
 	if dir == "" {
@@ -67,7 +66,6 @@ func initDB() {
 // Cached helpers
 // ----------------------------------------------------------------------------
 
-// getCachedWordList returns the word list from memory, or loads + caches it.
 func getCachedWordList(lang string, length int) (map[string]string, error) {
 	key := fmt.Sprintf("%s:%d", lang, length)
 	if v, ok := wordListCache.Load(key); ok {
@@ -91,7 +89,6 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 	return words, nil
 }
 
-// getCachedLanguages returns a sorted slice of language names, fetching once.
 func getCachedLanguages() []string {
 	langCacheMu.RLock()
 	if langCache != nil {
@@ -177,7 +174,6 @@ func handleNewGame(c *gin.Context) {
 		return
 	}
 
-	// Pick a random answer
 	wordSlice := make([]string, 0, len(words))
 	for w := range words {
 		wordSlice = append(wordSlice, w)
@@ -197,14 +193,20 @@ func handleNewGame(c *gin.Context) {
 		return
 	}
 
+	alphabet := buildAlphabet(words)
+	keyboardRows, overflowBases, equivalences, rtl := buildGameExtras(alphabet, req.Lang)
 	c.JSON(http.StatusOK, gin.H{
-		"id":          game.ID,
-		"lang":        game.Lang,
-		"word_length": game.WordLength,
-		"max_guesses": game.MaxGuesses,
-		"status":      game.Status,
-		"guesses":     []guessResp{},
-		"alphabet":    buildAlphabet(words),
+		"id":             game.ID,
+		"lang":           game.Lang,
+		"word_length":    game.WordLength,
+		"max_guesses":    game.MaxGuesses,
+		"status":         game.Status,
+		"guesses":        []guessResp{},
+		"alphabet":       alphabet,
+		"keyboard_rows":  keyboardRows,
+		"overflow_bases": overflowBases,
+		"equivalences":   equivalences,
+		"rtl":            rtl,
 	})
 }
 
@@ -224,20 +226,29 @@ func handleGetGame(c *gin.Context) {
 		return
 	}
 
-	// Alphabet from in-memory cache (best-effort)
+	// Alphabet and derived UI data from in-memory cache (best-effort)
 	var alphabet []string
+	var keyboardRows [][]string
+	var overflowBases []string
+	var equivalences [][]string
+	var rtl bool
 	if v, ok := wordListCache.Load(fmt.Sprintf("%s:%d", game.Lang, game.WordLength)); ok {
 		alphabet = buildAlphabet(v.(map[string]string))
+		keyboardRows, overflowBases, equivalences, rtl = buildGameExtras(alphabet, game.Lang)
 	}
 
 	resp := gin.H{
-		"id":          game.ID,
-		"lang":        game.Lang,
-		"word_length": game.WordLength,
-		"max_guesses": game.MaxGuesses,
-		"status":      game.Status,
-		"guesses":     parseGuesses(game.Guesses),
-		"alphabet":    alphabet,
+		"id":             game.ID,
+		"lang":           game.Lang,
+		"word_length":    game.WordLength,
+		"max_guesses":    game.MaxGuesses,
+		"status":         game.Status,
+		"guesses":        parseGuesses(game.Guesses),
+		"alphabet":       alphabet,
+		"keyboard_rows":  keyboardRows,
+		"overflow_bases": overflowBases,
+		"equivalences":   equivalences,
+		"rtl":            rtl,
 	}
 	if game.Status != "playing" {
 		resp["answer"] = game.Answer
@@ -313,7 +324,6 @@ func handleGuess(c *gin.Context) {
 		}
 	}
 
-	// Evaluate
 	answerChars := wordChars(game.Answer)
 	states := evaluate(guessChars, answerChars)
 	statesJSON, _ := json.Marshal(states)
@@ -332,8 +342,7 @@ func handleGuess(c *gin.Context) {
 
 	const inWordList = true
 
-	// Update game status
-	// Win if every tile is correct (accent-insensitive, derived from evaluate).
+	// win if all tiles correct
 	won := true
 	for _, st := range states {
 		if st != "correct" {
@@ -374,7 +383,6 @@ func handleGetStats(c *gin.Context) {
 	lang := c.Query("lang")
 	lengthStr := c.Query("length")
 
-	// Build base query with optional filters
 	filter := func(q *gorm.DB) *gorm.DB {
 		if lang != "" {
 			q = q.Where("lang = ?", lang)
