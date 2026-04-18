@@ -255,6 +255,39 @@ func normalizeWord(word string) string {
 	return b.String()
 }
 
+// matchWildcard finds a canonical word from normSet whose grapheme clusters match
+// guessChars, where a guessChar of "*" matches only chars whose normalizeChar is
+// in overflowBaseSet (the keyboard-overflow equivalence group).
+// Non-wildcard positions are compared accent-insensitively via normalizeChar.
+// Returns the canonical word on first match, or "" if none found.
+func matchWildcard(guessChars []string, normSet map[string]string, overflowBaseSet map[string]bool) string {
+	n := len(guessChars)
+	for _, canonical := range normSet {
+		cChars := wordChars(canonical)
+		if len(cChars) != n {
+			continue
+		}
+		match := true
+		for i, gc := range guessChars {
+			if gc == "*" {
+				if !overflowBaseSet[normalizeChar(cChars[i])] {
+					match = false
+					break
+				}
+				continue
+			}
+			if normalizeChar(gc) != normalizeChar(cChars[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return canonical
+		}
+	}
+	return ""
+}
+
 // buildNormalizedSet returns a set of normalized (accent-stripped) word forms
 // mapped back to one canonical original word. Used for variant-aware lookup.
 func buildNormalizedSet(words map[string]string) map[string]string {

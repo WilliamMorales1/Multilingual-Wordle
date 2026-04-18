@@ -34,8 +34,9 @@ func dataPath(name string) string {
 
 var (
 	db            *gorm.DB
-	wordListCache     sync.Map // key: "lang:length" → map[string]string
-	normalizedCache   sync.Map // key: "lang:length" → map[string]string (normalizedWord → original)
+	wordListCache   sync.Map // key: "lang:length" → map[string]string
+	normalizedCache sync.Map // key: "lang:length" → map[string]string (normalizedWord → original)
+	overflowCache   sync.Map // key: "lang:length" → map[string]bool (overflow base set)
 	loadMu        sync.Mutex
 
 	langCacheMu sync.RWMutex
@@ -86,6 +87,13 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 	}
 	wordListCache.Store(key, words)
 	normalizedCache.Store(key, buildNormalizedSet(words))
+	alphabet := buildAlphabet(words)
+	_, overflowBases := buildKeyboardData(alphabet, lang)
+	overflowSet := make(map[string]bool, len(overflowBases))
+	for _, b := range overflowBases {
+		overflowSet[b] = true
+	}
+	overflowCache.Store(key, overflowSet)
 	return words, nil
 }
 
@@ -296,24 +304,37 @@ func handleGuess(c *gin.Context) {
 		return
 	}
 	for _, r := range guess {
-		if !isWordChar(r) {
+		if r != '*' && !isWordChar(r) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "word contains invalid characters"})
 			return
 		}
 	}
 
 	// Reject guesses not in the word list; accept accent variants (e.g. "cafe" → "café")
+	// and wildcard guesses where "*" matches any single grapheme cluster.
 	words, err := getCachedWordList(game.Lang, game.WordLength)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	hasWildcard := strings.Contains(guess, "*")
 	if _, ok := words[guess]; !ok {
 		key := fmt.Sprintf("%s:%d", game.Lang, game.WordLength)
 		if v, ok2 := normalizedCache.Load(key); ok2 {
 			normSet := v.(map[string]string)
-			if canonical, ok3 := normSet[normalizeWord(guess)]; ok3 {
-				guess = canonical // use the accented form for evaluation
+			var canonical string
+			if hasWildcard {
+				var overflowSet map[string]bool
+				if ov, ok3 := overflowCache.Load(key); ok3 {
+					overflowSet = ov.(map[string]bool)
+				}
+				canonical = matchWildcard(guessChars, normSet, overflowSet)
+			} else {
+				canonical = normSet[normalizeWord(guess)]
+			}
+			if canonical != "" {
+				guess = canonical
+				guessChars = wordChars(guess)
 			} else {
 				c.JSON(http.StatusOK, gin.H{"error": "Not in word list"})
 				return
