@@ -1,2 +1,4 @@
-cache/
+backend/cache/
 TODO.md
+backend/wordle.db
+backend/wordle.exe
