@@ -94,12 +94,14 @@ func handleNewGame(w http.ResponseWriter, r *http.Request) {
 		Status:     "playing",
 	}
 	if err := dbCreateGame(&game); err != nil {
+		logger.Error("create game failed", "err", err)
 		jsonErr(w, "failed to create game", http.StatusInternalServerError)
 		return
 	}
+	logger.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength, "max_guesses", game.MaxGuesses)
 
 	alphabet := buildAlphabet(words)
-	keyboardRows, overflowBases, equivalences, rtl := buildGameExtras(alphabet, req.Lang)
+	keyboardRows, overflowBases, equivalences, rtl := buildGameExtras(alphabet, req.Lang, words)
 	jsonOK(w, map[string]any{
 		"id":             game.ID,
 		"lang":           game.Lang,
@@ -136,7 +138,7 @@ func handleGetGame(w http.ResponseWriter, r *http.Request) {
 	var rtl bool
 	if words := getWordListIfCached(game.Lang, game.WordLength); words != nil {
 		alphabet = buildAlphabet(words)
-		keyboardRows, overflowBases, equivalences, rtl = buildGameExtras(alphabet, game.Lang)
+		keyboardRows, overflowBases, equivalences, rtl = buildGameExtras(alphabet, game.Lang, words)
 	}
 
 	resp := map[string]any{
@@ -189,6 +191,9 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	guess := strings.ToLower(strings.TrimSpace(req.Word))
+	if isJapaneseLang(game.Lang) {
+		guess = katakanaToHiragana(guess)
+	}
 	guessChars := wordChars(guess)
 
 	if len(guessChars) != game.WordLength {
@@ -256,7 +261,9 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 	}
 	if won || lost {
 		_ = dbUpdateGameStatus(game.ID, newStatus)
+		logger.Info("game over", "id", game.ID, "status", newStatus, "attempts", attempt)
 	}
+	logger.Debug("guess", "id", game.ID, "attempt", attempt, "word", guess, "won", won)
 
 	resp := map[string]any{
 		"attempt":      attempt,

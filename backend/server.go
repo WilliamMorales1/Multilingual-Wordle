@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +22,7 @@ func noCacheHandler(h http.Handler) http.Handler {
 }
 
 func main() {
+	initLogger()
 	initDB()
 
 	mux := http.NewServeMux()
@@ -53,6 +53,8 @@ func main() {
 		http.ServeFile(w, r, "../frontend/index.html")
 	})
 
-	log.Println("Wordle server running → http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	logger.Info("server starting", "addr", ":8080")
+	if err := http.ListenAndServe(":8080", loggingMiddleware(mux)); err != nil {
+		logger.Error("server failed", "err", err)
+	}
 }

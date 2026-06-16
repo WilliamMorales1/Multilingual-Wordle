@@ -97,10 +97,22 @@ func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[strin
 				if entry.Lang != lang || len(entry.Senses) == 0 {
 					continue
 				}
-				if !isValid(entry.Word, length) {
+				word := strings.ToLower(entry.Word)
+				if isHangulLang(lang) {
+					word = expandJamo(decomposeHangul(word))
+					if !isPureJamo(word) {
+						continue
+					}
+				} else if isJapaneseLang(lang) {
+					word = katakanaToHiragana(word)
+					if !isPureHiragana(word) {
+						continue
+					}
+				}
+				if !isValid(word, length) {
 					continue
 				}
-				results <- result{strings.ToLower(entry.Word), firstGloss(entry)}
+				results <- result{word, firstGloss(entry)}
 			}
 		})
 	}

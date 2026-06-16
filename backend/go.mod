@@ -1,4 +1,4 @@
-module wordle
+module wordgo
 
 go 1.26.2
 

@@ -51,7 +51,7 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 
 	normalized := buildNormalizedSet(words)
 	alphabet := buildAlphabet(words)
-	_, overflowBases := buildKeyboardData(alphabet, lang)
+	_, overflowBases, _ := buildKeyboardData(alphabet, lang, words)
 	overflowSet := make(map[string]bool, len(overflowBases))
 	for _, b := range overflowBases {
 		overflowSet[b] = true

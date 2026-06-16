@@ -13,7 +13,7 @@ var db *sql.DB
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite", dataPath("wordle.db"))
+	db, err = sql.Open("sqlite", dataPath("wordgo.db"))
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
@@ -23,7 +23,7 @@ func initDB() {
 	if err := createTables(); err != nil {
 		log.Fatal("Failed to create tables:", err)
 	}
-	log.Println("Database ready (wordle.db)")
+	log.Println("Database ready (wordgo.db)")
 }
 
 func createTables() error {
