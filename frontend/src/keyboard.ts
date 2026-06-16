@@ -1,7 +1,7 @@
 import { S } from './state.js';
 
 export function stripDiacritics(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
 export function buildKeyboard(rows: string[][] | null, overflowBases: Set<string>, onKey: (ch: string) => void, onEnter: () => void, onBack: () => void): void {

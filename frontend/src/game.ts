@@ -27,6 +27,7 @@ function stopProgressPolling(): void {
 export function onKeyPress(ch: string): void {
   if (S.status !== 'playing') return;
   if (S.input.length >= S.wordLength) return;
+  if (/^\p{M}+$/u.test(ch)) return; // ignore standalone combining marks (Indic matras etc.)
   S.input.push(ch);
   updateCurrentRow();
 }

@@ -116,7 +116,7 @@
 
   // src/keyboard.ts
   function stripDiacritics(s) {
-    return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   }
   function buildKeyboard(rows, overflowBases, onKey, onEnter2, onBack) {
     const kb = document.getElementById("keyboard");
@@ -267,6 +267,7 @@
   function onKeyPress(ch) {
     if (S.status !== "playing") return;
     if (S.input.length >= S.wordLength) return;
+    if (/^\p{M}+$/u.test(ch)) return;
     S.input.push(ch);
     updateCurrentRow();
   }

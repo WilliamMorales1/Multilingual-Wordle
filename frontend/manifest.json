@@ -1,6 +1,6 @@
 {
-  "name": "Multilingual Wordle",
-  "short_name": "Wordle",
+  "name": "Wordgo: Multilingual Wordle",
+  "short_name": "Wordgo",
   "description": "Wordle in any language",
   "start_url": "/",
   "display": "standalone",
