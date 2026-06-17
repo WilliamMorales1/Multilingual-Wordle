@@ -1,6 +1,6 @@
 import { S } from './state.js';
 import { api } from './api.js';
-import { buildBoard, updateCurrentRow, revealRow, bounceRow, shakeRow } from './board.js';
+import { buildBoard, updateCurrentRow, revealRow, bounceRow, shakeRow, setRowCaption } from './board.js';
 import { buildKeyboard, refreshKeyboard, stripDiacritics } from './keyboard.js';
 import { toast, openModal, closeModal, showEquivNotice, showStats } from './ui.js';
 
@@ -83,6 +83,8 @@ export async function onEnter(): Promise<void> {
     const t = document.getElementById(`tile-${rowIdx}-${c}`);
     if (t) t.textContent = (chars[c] ?? '').toUpperCase();
   }
+
+  setRowCaption(rowIdx, result.chars);
 
   revealRow(rowIdx, chars, states, () => {
     refreshKeyboard();

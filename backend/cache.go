@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 )
@@ -9,6 +10,8 @@ import (
 type wordListStore struct {
 	mu         sync.RWMutex
 	words      map[string]map[string]string // "lang:len" → word→def
+	hanzi      map[string]map[string]string // "lang:len" → romanized word→hanzi (Chinese dialects only)
+	etymology  map[string]map[string]string // "lang:len" → word→etymology text
 	normalized map[string]map[string]string // "lang:len" → normalizedWord→canonical
 	overflow   map[string]map[string]bool   // "lang:len" → base→bool
 	loadMu     sync.Mutex
@@ -16,6 +19,8 @@ type wordListStore struct {
 
 var wlCache = &wordListStore{
 	words:      make(map[string]map[string]string),
+	hanzi:      make(map[string]map[string]string),
+	etymology:  make(map[string]map[string]string),
 	normalized: make(map[string]map[string]string),
 	overflow:   make(map[string]map[string]bool),
 }
@@ -44,7 +49,7 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 	}
 	wlCache.mu.RUnlock()
 
-	words, err := loadWordList(lang, length)
+	words, hanzi, etymology, err := loadWordList(lang, length)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +64,30 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 
 	wlCache.mu.Lock()
 	wlCache.words[key] = words
+	wlCache.hanzi[key] = hanzi
+	wlCache.etymology[key] = etymology
 	wlCache.normalized[key] = normalized
 	wlCache.overflow[key] = overflowSet
 	wlCache.mu.Unlock()
 
 	return words, nil
+}
+
+// getCachedHanzi returns the romanized-word→hanzi map for a Chinese-dialect
+// word list, or nil if the language isn't a Chinese dialect or isn't cached yet.
+func getCachedHanzi(lang string, length int) map[string]string {
+	key := fmt.Sprintf("%s:%d", lang, length)
+	wlCache.mu.RLock()
+	defer wlCache.mu.RUnlock()
+	return wlCache.hanzi[key]
+}
+
+// getCachedEtymology returns the word→etymology map for a word list, or nil if not cached yet.
+func getCachedEtymology(lang string, length int) map[string]string {
+	key := fmt.Sprintf("%s:%d", lang, length)
+	wlCache.mu.RLock()
+	defer wlCache.mu.RUnlock()
+	return wlCache.etymology[key]
 }
 
 // getWordListIfCached returns the cached word list without triggering a load.
@@ -93,6 +117,22 @@ var (
 	langCache   []string
 )
 
+func clearWordListCache() error {
+	wlCache.mu.Lock()
+	wlCache.words = make(map[string]map[string]string)
+	wlCache.hanzi = make(map[string]map[string]string)
+	wlCache.etymology = make(map[string]map[string]string)
+	wlCache.normalized = make(map[string]map[string]string)
+	wlCache.overflow = make(map[string]map[string]bool)
+	wlCache.mu.Unlock()
+
+	langCacheMu.Lock()
+	langCache = nil
+	langCacheMu.Unlock()
+
+	return os.RemoveAll(dataPath("cache"))
+}
+
 func getCachedLanguages() []string {
 	langCacheMu.RLock()
 	if langCache != nil {
@@ -109,9 +149,12 @@ func getCachedLanguages() []string {
 	}
 
 	langMap := getLanguages()
-	names := make([]string, 0, len(langMap))
+	names := make([]string, 0, len(langMap)+len(chineseDialects))
 	for name := range langMap {
 		names = append(names, name)
+	}
+	for _, d := range chineseDialects {
+		names = append(names, fmt.Sprintf("Chinese (%s)", d))
 	}
 	sort.Strings(names)
 	langCache = names

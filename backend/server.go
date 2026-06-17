@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func dataPath(name string) string {
@@ -28,11 +30,14 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/languages", handleGetLanguages)
+	mux.HandleFunc("GET /api/avglength", handleGetAvgLength)
 	mux.HandleFunc("GET /api/progress", handleGetProgress)
 	mux.HandleFunc("POST /api/game", handleNewGame)
 	mux.HandleFunc("GET /api/game/{id}", handleGetGame)
 	mux.HandleFunc("POST /api/game/{id}/guess", handleGuess)
 	mux.HandleFunc("GET /api/stats", handleGetStats)
+	mux.HandleFunc("POST /api/cache/clear", handleClearCache)
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	frontend := http.FileServer(http.Dir("../frontend"))
 	mux.Handle("GET /frontend/", noCacheHandler(http.StripPrefix("/frontend/", frontend)))

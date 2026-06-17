@@ -10,23 +10,31 @@ export interface GameResult {
   overflow_bases: string[];
   equivalences: string[][];
   rtl: boolean;
+  answer?: string;
+  answer_chars?: string;
+  definition?: string;
+  etymology?: string;
   error?: string;
 }
 
 export interface GuessRecord {
   attempt: number;
   word: string;
+  chars?: string;
   states: string[];
 }
 
 export interface GuessResult {
   attempt: number;
   word: string;
+  chars?: string;
   states: string[];
   status: string;
   in_word_list: boolean;
   answer?: string;
+  answer_chars?: string;
   definition?: string;
+  etymology?: string;
   error?: string;
 }
 
@@ -45,6 +53,10 @@ export interface ProgressResult {
 
 export interface LanguagesResult {
   languages: string[];
+}
+
+export interface AvgLengthResult {
+  avg_length: number;
 }
 
 export interface NewGameRequest {

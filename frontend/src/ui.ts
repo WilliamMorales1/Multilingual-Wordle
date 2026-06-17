@@ -63,8 +63,18 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
 
   const defEl = document.getElementById('definition')!;
   if (lastResult?.answer) {
-    document.getElementById('defWord')!.textContent = lastResult.answer.toUpperCase();
+    const word = lastResult.answer.toUpperCase();
+    document.getElementById('defWord')!.textContent = lastResult.answer_chars
+      ? `${word} (${lastResult.answer_chars})`
+      : word;
     document.getElementById('defText')!.textContent = lastResult.definition ?? '(no definition available)';
+    const etyEl = document.getElementById('defEtymology')!;
+    if (lastResult.etymology) {
+      etyEl.textContent = `Etymology: ${lastResult.etymology}`;
+      etyEl.style.display = 'block';
+    } else {
+      etyEl.style.display = 'none';
+    }
     defEl.style.display = 'block';
   } else {
     defEl.style.display = 'none';

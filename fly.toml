@@ -15,6 +15,10 @@ primary_region = 'dfw'
   source = 'wordle_data'
   destination = '/data'
 
+[metrics]
+  port = 8080
+  path = "/metrics"
+
 [http_service]
   internal_port = 8080
   force_https = true

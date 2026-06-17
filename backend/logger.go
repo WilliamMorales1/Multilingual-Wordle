@@ -4,7 +4,25 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total HTTP requests by method, path pattern, and status",
+	}, []string{"method", "path", "status"})
+
+	httpRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "HTTP request duration in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"method", "path"})
 )
 
 var logger *slog.Logger
@@ -28,16 +46,33 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+func metricsRoute(path string) string {
+	if strings.HasPrefix(path, "/api/game/") {
+		return "/api/game/{id}"
+	}
+	if strings.HasPrefix(path, "/icons/") {
+		return "/icons/*"
+	}
+	if strings.HasPrefix(path, "/frontend/") {
+		return "/frontend/*"
+	}
+	return path
+}
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+		dur := time.Since(start)
+		route := metricsRoute(r.URL.Path)
+		httpRequestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(rec.status)).Inc()
+		httpRequestDuration.WithLabelValues(r.Method, route).Observe(dur.Seconds())
 		logger.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", dur.Milliseconds(),
 			"remote", r.RemoteAddr,
 		)
 	})

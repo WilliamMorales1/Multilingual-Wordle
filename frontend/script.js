@@ -33,10 +33,12 @@
   }
   var api = {
     languages: () => apiFetch("/api/languages"),
+    avgLength: (lang) => apiFetch(`/api/avglength?lang=${encodeURIComponent(lang)}`),
     newGame: (b) => apiFetch("/api/game", { method: "POST", body: JSON.stringify(b) }),
     guess: (id, word) => apiFetch(`/api/game/${id}/guess`, { method: "POST", body: JSON.stringify({ word }) }),
     stats: (lang, len) => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
-    progress: (lang, len) => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`)
+    progress: (lang, len) => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
+    clearCache: () => apiFetch("/api/cache/clear", { method: "POST" })
   };
 
   // src/board.ts
@@ -50,6 +52,8 @@
     board.style.gridTemplateRows = `repeat(${S.maxGuesses}, 1fr)`;
     document.documentElement.style.setProperty("--tile-size", sz + "px");
     for (let r = 0; r < S.maxGuesses; r++) {
+      const wrap = document.createElement("div");
+      wrap.className = "board-row-wrap";
       const row = document.createElement("div");
       row.className = "board-row";
       row.id = `row-${r}`;
@@ -61,8 +65,18 @@
         tile.id = `tile-${r}-${c}`;
         row.appendChild(tile);
       }
-      board.appendChild(row);
+      wrap.appendChild(row);
+      const caption = document.createElement("div");
+      caption.className = "row-caption";
+      caption.id = `caption-${r}`;
+      wrap.appendChild(caption);
+      board.appendChild(wrap);
     }
+  }
+  function setRowCaption(rowIdx, chars) {
+    const el = document.getElementById(`caption-${rowIdx}`);
+    if (!el) return;
+    el.textContent = chars ?? "";
   }
   function setTileText(row, col, ch) {
     const t = document.getElementById(`tile-${row}-${col}`);
@@ -236,8 +250,16 @@
     }
     const defEl = document.getElementById("definition");
     if (lastResult?.answer) {
-      document.getElementById("defWord").textContent = lastResult.answer.toUpperCase();
+      const word = lastResult.answer.toUpperCase();
+      document.getElementById("defWord").textContent = lastResult.answer_chars ? `${word} (${lastResult.answer_chars})` : word;
       document.getElementById("defText").textContent = lastResult.definition ?? "(no definition available)";
+      const etyEl = document.getElementById("defEtymology");
+      if (lastResult.etymology) {
+        etyEl.textContent = `Etymology: ${lastResult.etymology}`;
+        etyEl.style.display = "block";
+      } else {
+        etyEl.style.display = "none";
+      }
       defEl.style.display = "block";
     } else {
       defEl.style.display = "none";
@@ -315,6 +337,7 @@
       const t = document.getElementById(`tile-${rowIdx}-${c}`);
       if (t) t.textContent = (chars[c] ?? "").toUpperCase();
     }
+    setRowCaption(rowIdx, result.chars);
     revealRow(rowIdx, chars, states, () => {
       refreshKeyboard();
       S.currentRow++;
@@ -396,6 +419,14 @@
   document.getElementById("equiv-close").addEventListener("click", () => {
     document.getElementById("equiv-notice").hidden = true;
   });
+  document.getElementById("clearCacheBtn").addEventListener("click", async () => {
+    try {
+      await api.clearCache();
+      toast("Cache cleared");
+    } catch (_) {
+      toast("Failed to clear cache");
+    }
+  });
   document.querySelectorAll(".modal").forEach((m) => {
     m.addEventListener("click", (e) => {
       if (e.target === m) {
@@ -436,6 +467,15 @@
       input.value = lang;
       options.hidden = true;
       activeIdx = -1;
+      applyAvgLength(lang);
+    }
+    function applyAvgLength(lang) {
+      const lengthInput = document.getElementById("lengthInput");
+      if (!lengthInput) return;
+      api.avgLength(lang).then((data) => {
+        if (data.avg_length > 0) lengthInput.value = String(Math.round(data.avg_length));
+      }).catch(() => {
+      });
     }
     function setActive(idx) {
       const opts = options.querySelectorAll(".lang-option");

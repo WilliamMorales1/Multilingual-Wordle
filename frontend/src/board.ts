@@ -12,6 +12,9 @@ export function buildBoard(): void {
   document.documentElement.style.setProperty('--tile-size', sz + 'px');
 
   for (let r = 0; r < S.maxGuesses; r++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'board-row-wrap';
+
     const row = document.createElement('div');
     row.className = 'board-row';
     row.id = `row-${r}`;
@@ -23,8 +26,23 @@ export function buildBoard(): void {
       tile.id = `tile-${r}-${c}`;
       row.appendChild(tile);
     }
-    board.appendChild(row);
+    wrap.appendChild(row);
+
+    const caption = document.createElement('div');
+    caption.className = 'row-caption';
+    caption.id = `caption-${r}`;
+    wrap.appendChild(caption);
+
+    board.appendChild(wrap);
   }
+}
+
+// setRowCaption shows romanized words' original characters (e.g. Chinese
+// hanzi) under a guess row, since the tiles themselves hold the romanization.
+export function setRowCaption(rowIdx: number, chars: string | undefined): void {
+  const el = document.getElementById(`caption-${rowIdx}`);
+  if (!el) return;
+  el.textContent = chars ?? '';
 }
 
 export function setTileText(row: number, col: number, ch: string): void {

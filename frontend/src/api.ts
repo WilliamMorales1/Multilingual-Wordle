@@ -1,6 +1,6 @@
 import type {
   GameResult, GuessResult, StatsResult,
-  ProgressResult, LanguagesResult, NewGameRequest,
+  ProgressResult, LanguagesResult, AvgLengthResult, NewGameRequest,
 } from './types.js';
 
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -22,8 +22,10 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 export const api = {
   languages: ():                          Promise<LanguagesResult> => apiFetch('/api/languages'),
+  avgLength: (lang: string):              Promise<AvgLengthResult> => apiFetch(`/api/avglength?lang=${encodeURIComponent(lang)}`),
   newGame:   (b: NewGameRequest):         Promise<GameResult>      => apiFetch('/api/game', { method: 'POST', body: JSON.stringify(b) }),
   guess:     (id: number, word: string):  Promise<GuessResult>     => apiFetch(`/api/game/${id}/guess`, { method: 'POST', body: JSON.stringify({ word }) }),
   stats:     (lang: string, len: number): Promise<StatsResult>     => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
   progress:  (lang: string, len: number): Promise<ProgressResult>  => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
+  clearCache: ():                         Promise<{ok: boolean}>   => apiFetch('/api/cache/clear', { method: 'POST' }),
 };

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 // Keyboard layout detection and per-language key arrangement.
 

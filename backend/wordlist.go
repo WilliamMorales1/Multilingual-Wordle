@@ -26,9 +26,94 @@ const (
 )
 
 type KaikkiEntry struct {
-	Word   string           `json:"word"`
-	Lang   string           `json:"lang"`
-	Senses []map[string]any `json:"senses"`
+	Word      string           `json:"word"`
+	Lang      string           `json:"lang"`
+	Pos       string           `json:"pos"`
+	Senses    []map[string]any `json:"senses"`
+	Sounds    []KaikkiSound    `json:"sounds"`
+	Etymology string           `json:"etymology_text"`
+}
+
+// excludedSenseTags marks senses that identify a word as a proper noun,
+// given name, or surname rather than an ordinary dictionary word.
+var excludedSenseTags = map[string]bool{
+	"proper-noun": true, "proper noun": true,
+	"given-name": true, "given name": true,
+	"surname": true, "surnames": true,
+}
+
+// isExcludedEntry reports whether an entry should be skipped because it (or
+// all of its senses) is tagged as a proper noun, given name, or surname.
+func isExcludedEntry(entry KaikkiEntry) bool {
+	if strings.EqualFold(entry.Pos, "name") {
+		return true
+	}
+	for _, sense := range entry.Senses {
+		tags, ok := sense["tags"].([]any)
+		if !ok {
+			continue
+		}
+		for _, t := range tags {
+			tag, ok := t.(string)
+			if ok && excludedSenseTags[strings.ToLower(tag)] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type KaikkiSound struct {
+	ZhPron string   `json:"zh_pron"`
+	Tags   []string `json:"tags"`
+}
+
+// chineseDialects lists topolects exposed as "Chinese (X)" pseudo-languages.
+// Each maps to the single kaikki.org "Chinese" dump, picking romanization by
+// matching this name against a sound entry's tags (e.g. "Cantonese", "Hokkien").
+var chineseDialects = []string{
+	"Mandarin", "Cantonese", "Hokkien", "Teochew", "Hakka", "Wu",
+	"Min Bei", "Min Dong", "Gan", "Xiang", "Jin",
+}
+
+// parseChineseDialect extracts the dialect name from a "Chinese (X)" pseudo-language.
+func parseChineseDialect(lang string) (string, bool) {
+	if !strings.HasPrefix(lang, "Chinese (") || !strings.HasSuffix(lang, ")") {
+		return "", false
+	}
+	d := strings.TrimSuffix(strings.TrimPrefix(lang, "Chinese ("), ")")
+	if d == "" {
+		return "", false
+	}
+	return d, true
+}
+
+// romanizeEntry returns the romanization for the given dialect from an entry's
+// sounds list (e.g. Pinyin for Mandarin, Jyutping for Cantonese), or "" if absent.
+func romanizeEntry(entry KaikkiEntry, dialect string) string {
+	for _, s := range entry.Sounds {
+		if s.ZhPron == "" {
+			continue
+		}
+		for _, t := range s.Tags {
+			if strings.EqualFold(t, dialect) {
+				return s.ZhPron
+			}
+		}
+	}
+	return ""
+}
+
+// filterLetters strips everything but letters and combining marks (digits,
+// spaces, hyphens, tone numbers) so a romanization can be used as a word.
+func filterLetters(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if isWordChar(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // kaikkiURL builds the per-language dump URL on kaikki.org.
@@ -63,24 +148,24 @@ func firstGloss(entry KaikkiEntry) string {
 
 // streamURL downloads and parses a gzipped JSONL word dump from kaikki.org.
 // Parsing is parallelised across CPU workers while the scanner streams the download.
-func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[string]string, error) {
+func streamURL(rawURL, lang, dialect string, length int, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, nil, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	defer gz.Close()
 
-	type result struct{ word, def string }
+	type result struct{ word, def, hanzi, etymology string }
 
 	numWorkers := runtime.NumCPU()
 	lines := make(chan []byte, numWorkers*8)
@@ -94,25 +179,35 @@ func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[strin
 				if json.Unmarshal(line, &entry) != nil {
 					continue
 				}
-				if entry.Lang != lang || len(entry.Senses) == 0 {
+				if entry.Lang != lang || len(entry.Senses) == 0 || isExcludedEntry(entry) {
 					continue
 				}
-				word := strings.ToLower(entry.Word)
-				if isHangulLang(lang) {
-					word = expandJamo(decomposeHangul(word))
-					if !isPureJamo(word) {
+				var word, hanzi string
+				if dialect != "" {
+					rom := romanizeEntry(entry, dialect)
+					if rom == "" {
 						continue
 					}
-				} else if isJapaneseLang(lang) {
-					word = katakanaToHiragana(word)
-					if !isPureHiragana(word) {
-						continue
+					word = filterLetters(strings.ToLower(rom))
+					hanzi = entry.Word
+				} else {
+					word = strings.ToLower(entry.Word)
+					if isHangulLang(lang) {
+						word = expandJamo(decomposeHangul(word))
+						if !isPureJamo(word) {
+							continue
+						}
+					} else if isJapaneseLang(lang) {
+						word = katakanaToHiragana(word)
+						if !isPureHiragana(word) {
+							continue
+						}
 					}
 				}
 				if !isValid(word, length) {
 					continue
 				}
-				results <- result{word, firstGloss(entry)}
+				results <- result{word, firstGloss(entry), hanzi, entry.Etymology}
 			}
 		})
 	}
@@ -136,9 +231,20 @@ func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[strin
 	}()
 
 	words := make(map[string]string)
+	etymology := make(map[string]string)
+	var hanziMap map[string]string
+	if dialect != "" {
+		hanziMap = make(map[string]string)
+	}
 	for r := range results {
 		if _, exists := words[r.word]; !exists {
 			words[r.word] = r.def
+			if r.etymology != "" {
+				etymology[r.word] = r.etymology
+			}
+			if hanziMap != nil {
+				hanziMap[r.word] = r.hanzi
+			}
 		}
 		if len(words)%500 == 0 {
 			log.Printf("  %d words collected...", len(words))
@@ -151,40 +257,73 @@ func streamURL(rawURL, lang string, length int, onProgress func(int)) (map[strin
 	if scanErr != nil {
 		if len(words) >= 20 {
 			log.Printf("Warning: scanner error after %d words (%v) — using partial results", len(words), scanErr)
-			return words, nil
+			return words, hanziMap, etymology, nil
 		}
-		return nil, scanErr
+		return nil, nil, nil, scanErr
 	}
-	return words, nil
+	return words, hanziMap, etymology, nil
 }
 
-func loadWordList(lang string, length int) (map[string]string, error) {
+// hanziCachePath returns the sidecar cache path holding hanzi for a Chinese-dialect word list.
+func hanziCachePath(lang string, length int) string {
+	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
+	dir := dataPath("cache")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, fmt.Sprintf("%s_%dl_hanzi.json", safe, length))
+}
+
+// etymologyCachePath returns the sidecar cache path holding etymology text for a word list.
+func etymologyCachePath(lang string, length int) string {
+	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
+	dir := dataPath("cache")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, fmt.Sprintf("%s_%dl_etymology.json", safe, length))
+}
+
+func loadWordList(lang string, length int) (map[string]string, map[string]string, map[string]string, error) {
 	cf := cachePath(lang, length)
+	hcf := hanziCachePath(lang, length)
+	ecf := etymologyCachePath(lang, length)
 
 	if data, err := os.ReadFile(cf); err == nil {
 		var cached map[string]string
 		if err := json.Unmarshal(data, &cached); err == nil && len(cached) >= 20 {
 			log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lang, length, filepath.Base(cf))
-			return cached, nil
+			var hanzi map[string]string
+			if hdata, err := os.ReadFile(hcf); err == nil {
+				json.Unmarshal(hdata, &hanzi)
+			}
+			var etymology map[string]string
+			if edata, err := os.ReadFile(ecf); err == nil {
+				json.Unmarshal(edata, &etymology)
+			}
+			return cached, hanzi, etymology, nil
 		}
 	}
 
-	u := kaikkiURL(lang)
-	log.Printf("Downloading %s wiktextract dump from %s", lang, u)
+	matchLang := lang
+	dialect := ""
+	if d, ok := parseChineseDialect(lang); ok {
+		matchLang = "Chinese"
+		dialect = d
+	}
+
+	u := kaikkiURL(matchLang)
+	log.Printf("Downloading %s wiktextract dump from %s", matchLang, u)
 
 	key := fmt.Sprintf("%s:%d", lang, length)
-	words, err := streamURL(u, lang, length, func(n int) {
+	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, func(n int) {
 		downloadProgress.Store(key, n)
 	})
 	downloadProgress.Delete(key)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lang)
+			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lang)
 		}
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if len(words) == 0 {
-		return nil, fmt.Errorf("no %d-character %s words found", length, lang)
+		return nil, nil, nil, fmt.Errorf("no %d-character %s words found", length, lang)
 	}
 
 	log.Printf("%d %s %d-letter words collected", len(words), lang, length)
@@ -194,7 +333,17 @@ func loadWordList(lang string, length int) (map[string]string, error) {
 			log.Printf("Cached at %s", cf)
 		}
 	}
-	return words, nil
+	if hanzi != nil {
+		if data, err := json.Marshal(hanzi); err == nil {
+			os.WriteFile(hcf, data, 0644)
+		}
+	}
+	if len(etymology) > 0 {
+		if data, err := json.Marshal(etymology); err == nil {
+			os.WriteFile(ecf, data, 0644)
+		}
+	}
+	return words, hanzi, etymology, nil
 }
 
 // getLanguages scrapes available language names from kaikki.org.

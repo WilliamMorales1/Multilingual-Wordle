@@ -5,7 +5,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
 }
 import { startGame, onEnter, onBackspace, onKeyPress } from './game.js';
-import { openModal, closeModal, showStats } from './ui.js';
+import { openModal, closeModal, showStats, toast } from './ui.js';
 
 // ── Physical keyboard ─────────────────────────────────────────────────────────
 
@@ -31,6 +31,14 @@ document.getElementById('newGameFromStats')!.addEventListener('click', () => {
 });
 document.getElementById('equiv-close')!.addEventListener('click', () => {
   document.getElementById('equiv-notice')!.hidden = true;
+});
+document.getElementById('clearCacheBtn')!.addEventListener('click', async () => {
+  try {
+    await api.clearCache();
+    toast('Cache cleared');
+  } catch (_) {
+    toast('Failed to clear cache');
+  }
 });
 
 document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
@@ -76,6 +84,17 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     input!.value = lang;
     options!.hidden = true;
     activeIdx = -1;
+    applyAvgLength(lang);
+  }
+
+  function applyAvgLength(lang: string): void {
+    const lengthInput = document.getElementById('lengthInput') as HTMLInputElement | null;
+    if (!lengthInput) return;
+    api.avgLength(lang)
+      .then(data => {
+        if (data.avg_length > 0) lengthInput.value = String(Math.round(data.avg_length));
+      })
+      .catch(() => {});
   }
 
   function setActive(idx: number): void {
