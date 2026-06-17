@@ -151,10 +151,15 @@ func getCachedLanguages() []string {
 	langMap := getLanguages()
 	names := make([]string, 0, len(langMap)+len(chineseDialects))
 	for name := range langMap {
-		names = append(names, name)
+		if _, ok := avgWordLengths[name]; ok {
+			names = append(names, name)
+		}
 	}
 	for _, d := range chineseDialects {
-		names = append(names, fmt.Sprintf("Chinese (%s)", d))
+		name := fmt.Sprintf("Chinese (%s)", d)
+		if _, ok := avgWordLengths[name]; ok {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	langCache = names

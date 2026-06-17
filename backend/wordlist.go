@@ -37,9 +37,10 @@ type KaikkiEntry struct {
 // excludedSenseTags marks senses that identify a word as a proper noun,
 // given name, or surname rather than an ordinary dictionary word.
 var excludedSenseTags = map[string]bool{
-	"proper-noun": true, "proper noun": true,
-	"given-name": true, "given name": true,
-	"surname": true, "surnames": true,
+	"proper nouns":    true,
+	"given names":     true,
+	"surnames":        true,
+	"non-lemma forms": true,
 }
 
 // isExcludedEntry reports whether an entry should be skipped because it (or
