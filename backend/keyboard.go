@@ -1,7 +1,5 @@
 package main
 
-// Keyboard layout detection and per-language key arrangement.
-
 import "sort"
 
 const logographicThreshold = 200
@@ -99,13 +97,10 @@ var keyboardLayouts = map[string][][]string{
 	},
 }
 
-// langLayoutMap overrides script-detection for languages that use a non-default layout.
-// Only should add very common langauges here for effeciency
-// French/German use azerty/qwertz which are pure rearrangements of the same
-// ASCII letters as qwerty — detectLayout has no unique chars to key off, so
-// these must stay manual. Everything else (nordic, turkish, devanagari,
-// korean, hiragana, ...) has distinguishing chars outside qwerty's 26 letters
-// and auto-detects fine.
+// langLayoutMap overrides script-detection for languages whose alphabet is a pure
+// rearrangement of qwerty's 26 ASCII letters (azerty, qwertz, geez), since
+// detectLayout has no unique chars to key off in that case. Keep this list small —
+// every other layout has distinguishing chars and auto-detects fine.
 var langLayoutMap = map[string]string{
 	"French": "azerty", "German": "qwertz",
 	"Amharic": "geez", "Tigrinya": "geez",

@@ -1,7 +1,5 @@
 package main
 
-// Word game evaluation and normalization logic.
-
 import (
 	"slices"
 	"sort"

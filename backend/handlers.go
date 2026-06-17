@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// ── JSON helpers ──────────────────────────────────────────────────────────────
-
 func jsonOK(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
@@ -22,8 +20,6 @@ func jsonErr(w http.ResponseWriter, msg string, code int) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{"error": msg})
 }
-
-// ── Response helpers ──────────────────────────────────────────────────────────
 
 type guessResp struct {
 	Attempt int      `json:"attempt"`
@@ -42,7 +38,19 @@ func parseGuesses(records []GuessRecord, hanzi map[string]string) []guessResp {
 	return out
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// addAnswerReveal fills in answer/definition/chars/etymology once a game is won or lost.
+func addAnswerReveal(resp map[string]any, game *Game, hanzi map[string]string) {
+	resp["answer"] = game.Answer
+	if words, err := getCachedWordList(game.Lang, game.WordLength); err == nil {
+		resp["definition"] = words[game.Answer]
+	}
+	if chars := hanzi[game.Answer]; chars != "" {
+		resp["answer_chars"] = chars
+	}
+	if ety := getCachedEtymology(game.Lang, game.WordLength)[game.Answer]; ety != "" {
+		resp["etymology"] = ety
+	}
+}
 
 // POST /api/cache/clear
 // If game_id refers to a game still in progress, that game's word list is
@@ -180,19 +188,10 @@ func handleGetGame(w http.ResponseWriter, r *http.Request) {
 		"rtl":            rtl,
 	}
 	if game.Status != "playing" {
-		resp["answer"] = game.Answer
-		if words, err := getCachedWordList(game.Lang, game.WordLength); err == nil {
-			resp["definition"] = words[game.Answer]
-		}
 		if hanzi == nil {
 			hanzi = getCachedHanzi(game.Lang, game.WordLength)
 		}
-		if chars := hanzi[game.Answer]; chars != "" {
-			resp["answer_chars"] = chars
-		}
-		if ety := getCachedEtymology(game.Lang, game.WordLength)[game.Answer]; ety != "" {
-			resp["etymology"] = ety
-		}
+		addAnswerReveal(resp, game, hanzi)
 	}
 
 	jsonOK(w, resp)
@@ -311,16 +310,7 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 		resp["chars"] = chars
 	}
 	if won || lost {
-		resp["answer"] = game.Answer
-		if words, err := getCachedWordList(game.Lang, game.WordLength); err == nil {
-			resp["definition"] = words[game.Answer]
-		}
-		if chars := hanzi[game.Answer]; chars != "" {
-			resp["answer_chars"] = chars
-		}
-		if ety := getCachedEtymology(game.Lang, game.WordLength)[game.Answer]; ety != "" {
-			resp["etymology"] = ety
-		}
+		addAnswerReveal(resp, game, hanzi)
 	}
 
 	jsonOK(w, resp)

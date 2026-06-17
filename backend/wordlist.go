@@ -1,7 +1,5 @@
 package main
 
-// Word list loading from kaikki.org and local cache management.
-
 import (
 	"bufio"
 	"compress/gzip"

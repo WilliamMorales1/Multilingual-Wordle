@@ -7,8 +7,6 @@ if ('serviceWorker' in navigator) {
 import { startGame, onEnter, onBackspace, onKeyPress } from './game.js';
 import { openModal, closeModal, showStats, toast } from './ui.js';
 
-// ── Physical keyboard ─────────────────────────────────────────────────────────
-
 document.addEventListener('keydown', (e: KeyboardEvent) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const tag = (document.activeElement as HTMLElement | null)?.tagName;
@@ -18,8 +16,6 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
   else if (e.key === 'Backspace') onBackspace();
   else if (e.key.length === 1)    onKeyPress(e.key.toLowerCase());
 });
-
-// ── Button wiring ─────────────────────────────────────────────────────────────
 
 document.getElementById('startBtn')!.addEventListener('click', startGame);
 document.getElementById('settingsBtn')!.addEventListener('click', () => openModal('settingsModal'));
@@ -49,8 +45,6 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     }
   });
 });
-
-// ── Language dropdown ─────────────────────────────────────────────────────────
 
 (async function initLangDropdown() {
   const input   = document.getElementById('langInput') as HTMLInputElement | null;
