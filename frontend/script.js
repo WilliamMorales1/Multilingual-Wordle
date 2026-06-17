@@ -191,6 +191,49 @@
     });
   }
 
+  // src/hangul.ts
+  var LEADS = ["\u3131", "\u3132", "\u3134", "\u3137", "\u3138", "\u3139", "\u3141", "\u3142", "\u3143", "\u3145", "\u3146", "\u3147", "\u3148", "\u3149", "\u314A", "\u314B", "\u314C", "\u314D", "\u314E"];
+  var VOWELS = ["\u314F", "\u3150", "\u3151", "\u3152", "\u3153", "\u3154", "\u3155", "\u3156", "\u3157", "\u3158", "\u3159", "\u315A", "\u315B", "\u315C", "\u315D", "\u315E", "\u315F", "\u3160", "\u3161", "\u3162", "\u3163"];
+  var FINALS = ["", "\u3131", "\u3132", "\u3133", "\u3134", "\u3135", "\u3136", "\u3137", "\u3139", "\u313A", "\u313B", "\u313C", "\u313D", "\u313E", "\u313F", "\u3140", "\u3141", "\u3142", "\u3144", "\u3145", "\u3146", "\u3147", "\u3148", "\u314A", "\u314B", "\u314C", "\u314D", "\u314E"];
+  function toIndexMap(list) {
+    const m = /* @__PURE__ */ new Map();
+    list.forEach((c, i) => {
+      if (c !== "") m.set(c, i);
+    });
+    return m;
+  }
+  var leadIndex = toIndexMap(LEADS);
+  var vowelIndex = toIndexMap(VOWELS);
+  var finalIndex = toIndexMap(FINALS);
+  function composeHangul(input) {
+    const chars = Array.from(input);
+    let out = "";
+    let i = 0;
+    while (i < chars.length) {
+      const c = chars[i];
+      const lead = leadIndex.get(c);
+      const nextVowel = i + 1 < chars.length ? vowelIndex.get(chars[i + 1]) : void 0;
+      if (lead !== void 0 && nextVowel !== void 0) {
+        const vowel = nextVowel;
+        i += 2;
+        let final = 0;
+        if (i < chars.length) {
+          const finalCandidate = finalIndex.get(chars[i]);
+          const followingVowel = i + 1 < chars.length ? vowelIndex.get(chars[i + 1]) : void 0;
+          if (finalCandidate !== void 0 && followingVowel === void 0) {
+            final = finalCandidate;
+            i += 1;
+          }
+        }
+        out += String.fromCodePoint(44032 + (lead * 21 + vowel) * 28 + final);
+      } else {
+        out += c;
+        i += 1;
+      }
+    }
+    return out;
+  }
+
   // src/ui.ts
   var toastTimer = null;
   function toast(msg, duration = 1800) {
@@ -252,6 +295,12 @@
     if (lastResult?.answer) {
       const word = lastResult.answer.toUpperCase();
       document.getElementById("defWord").textContent = lastResult.answer_chars ? `${word} (${lastResult.answer_chars})` : word;
+      const isKorean = S.lang.startsWith("Korean");
+      const wiktTerm = lastResult.answer_chars || (isKorean ? composeHangul(lastResult.answer) : lastResult.answer);
+      const wiktLangSection = S.lang.replace(/\s*\(.*\)\s*$/, "");
+      const wiktLink = document.getElementById("defWiktionary");
+      wiktLink.href = `https://en.wiktionary.org/wiki/${encodeURIComponent(wiktTerm)}#${encodeURIComponent(wiktLangSection)}`;
+      wiktLink.style.display = "inline";
       document.getElementById("defText").textContent = lastResult.definition ?? "(no definition available)";
       const etyEl = document.getElementById("defEtymology");
       if (lastResult.etymology) {

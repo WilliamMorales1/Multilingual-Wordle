@@ -1,6 +1,7 @@
 import { S } from './state.js';
 import { api } from './api.js';
 import type { GuessResult, StatsResult } from './types.js';
+import { composeHangul } from './hangul.js';
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -67,6 +68,14 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
     document.getElementById('defWord')!.textContent = lastResult.answer_chars
       ? `${word} (${lastResult.answer_chars})`
       : word;
+
+    const isKorean = S.lang.startsWith('Korean');
+    const wiktTerm = lastResult.answer_chars || (isKorean ? composeHangul(lastResult.answer) : lastResult.answer);
+    const wiktLangSection = S.lang.replace(/\s*\(.*\)\s*$/, '');
+    const wiktLink = document.getElementById('defWiktionary') as HTMLAnchorElement;
+    wiktLink.href = `https://en.wiktionary.org/wiki/${encodeURIComponent(wiktTerm)}#${encodeURIComponent(wiktLangSection)}`;
+    wiktLink.style.display = 'inline';
+
     document.getElementById('defText')!.textContent = lastResult.definition ?? '(no definition available)';
     const etyEl = document.getElementById('defEtymology')!;
     if (lastResult.etymology) {
