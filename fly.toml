@@ -12,7 +12,7 @@ primary_region = 'dfw'
   DATA_DIR = '/data'
 
 [[mounts]]
-  source = 'wordgo_data'
+  source = 'wordle_data'
   destination = '/data'
 
 [http_service]
