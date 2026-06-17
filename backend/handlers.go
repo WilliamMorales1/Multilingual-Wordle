@@ -45,8 +45,22 @@ func parseGuesses(records []GuessRecord, hanzi map[string]string) []guessResp {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 // POST /api/cache/clear
+// If game_id refers to a game still in progress, that game's word list is
+// kept cached so the current game isn't broken mid-play.
 func handleClearCache(w http.ResponseWriter, r *http.Request) {
-	if err := clearWordListCache(); err != nil {
+	var req struct {
+		GameID uint `json:"game_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var keep string
+	if req.GameID != 0 {
+		if game, err := dbGetGame(req.GameID); err == nil && game.Status == "playing" {
+			keep = fmt.Sprintf("%s:%d", game.Lang, game.WordLength)
+		}
+	}
+
+	if err := clearWordListCache(keep); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

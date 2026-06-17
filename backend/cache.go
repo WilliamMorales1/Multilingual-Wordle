@@ -117,13 +117,40 @@ var (
 	langCache   []string
 )
 
-func clearWordListCache() error {
+// clearWordListCache wipes the in-memory word list cache and on-disk cache
+// dir. If keep is non-empty (a "lang:len" key), that entry's in-memory data
+// is preserved so an in-progress game using it keeps working; its on-disk
+// cache file is still removed since it isn't needed again until the process
+// restarts.
+func clearWordListCache(keep string) error {
 	wlCache.mu.Lock()
-	wlCache.words = make(map[string]map[string]string)
-	wlCache.hanzi = make(map[string]map[string]string)
-	wlCache.etymology = make(map[string]map[string]string)
-	wlCache.normalized = make(map[string]map[string]string)
-	wlCache.overflow = make(map[string]map[string]bool)
+	newWords := make(map[string]map[string]string)
+	newHanzi := make(map[string]map[string]string)
+	newEtymology := make(map[string]map[string]string)
+	newNormalized := make(map[string]map[string]string)
+	newOverflow := make(map[string]map[string]bool)
+	if keep != "" {
+		if v, ok := wlCache.words[keep]; ok {
+			newWords[keep] = v
+		}
+		if v, ok := wlCache.hanzi[keep]; ok {
+			newHanzi[keep] = v
+		}
+		if v, ok := wlCache.etymology[keep]; ok {
+			newEtymology[keep] = v
+		}
+		if v, ok := wlCache.normalized[keep]; ok {
+			newNormalized[keep] = v
+		}
+		if v, ok := wlCache.overflow[keep]; ok {
+			newOverflow[keep] = v
+		}
+	}
+	wlCache.words = newWords
+	wlCache.hanzi = newHanzi
+	wlCache.etymology = newEtymology
+	wlCache.normalized = newNormalized
+	wlCache.overflow = newOverflow
 	wlCache.mu.Unlock()
 
 	langCacheMu.Lock()

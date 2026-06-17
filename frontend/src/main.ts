@@ -34,7 +34,7 @@ document.getElementById('equiv-close')!.addEventListener('click', () => {
 });
 document.getElementById('clearCacheBtn')!.addEventListener('click', async () => {
   try {
-    await api.clearCache();
+    await api.clearCache(S.status === 'playing' ? S.gameId : null);
     toast('Cache cleared');
   } catch (_) {
     toast('Failed to clear cache');

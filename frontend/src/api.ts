@@ -27,5 +27,5 @@ export const api = {
   guess:     (id: number, word: string):  Promise<GuessResult>     => apiFetch(`/api/game/${id}/guess`, { method: 'POST', body: JSON.stringify({ word }) }),
   stats:     (lang: string, len: number): Promise<StatsResult>     => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
   progress:  (lang: string, len: number): Promise<ProgressResult>  => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
-  clearCache: ():                         Promise<{ok: boolean}>   => apiFetch('/api/cache/clear', { method: 'POST' }),
+  clearCache: (gameId: number | null):    Promise<{ok: boolean}>   => apiFetch('/api/cache/clear', { method: 'POST', body: JSON.stringify({ game_id: gameId ?? 0 }) }),
 };

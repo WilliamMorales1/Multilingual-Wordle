@@ -38,7 +38,7 @@
     guess: (id, word) => apiFetch(`/api/game/${id}/guess`, { method: "POST", body: JSON.stringify({ word }) }),
     stats: (lang, len) => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
     progress: (lang, len) => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
-    clearCache: () => apiFetch("/api/cache/clear", { method: "POST" })
+    clearCache: (gameId) => apiFetch("/api/cache/clear", { method: "POST", body: JSON.stringify({ game_id: gameId ?? 0 }) })
   };
 
   // src/board.ts
@@ -470,7 +470,7 @@
   });
   document.getElementById("clearCacheBtn").addEventListener("click", async () => {
     try {
-      await api.clearCache();
+      await api.clearCache(S.status === "playing" ? S.gameId : null);
       toast("Cache cleared");
     } catch (_) {
       toast("Failed to clear cache");

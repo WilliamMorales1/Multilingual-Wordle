@@ -77,6 +77,26 @@ var keyboardLayouts = map[string][][]string{
 		{"ㅁ", "ㄴ", "ㅇ", "ㄹ", "ㅎ", "ㅗ", "ㅓ", "ㅏ", "ㅣ"},
 		{"ㅋ", "ㅌ", "ㅊ", "ㅍ", "ㅠ", "ㅜ", "ㅡ"},
 	},
+	"gujarati": {
+		{"ઔ", "ઐ", "આ", "ઈ", "ઊ", "ભ", "ઙ", "ઘ", "ધ", "ઝ", "ઢ", "ઞ"},
+		{"ઓ", "એ", "અ", "ઇ", "ઉ", "બ", "હ", "ગ", "દ", "જ", "ડ", "શ"},
+		{"ઑ", "ર", "ક", "ત", "ચ", "ટ", "પ", "ય", "સ", "મ", "વ", "લ", "ષ", "ન"},
+	},
+	"kannada": {
+		{"ಔ", "ಐ", "ಆ", "ಈ", "ಊ", "ಭ", "ಙ", "ಘ", "ಧ", "ಝ", "ಢ", "ಞ"},
+		{"ಓ", "ಏ", "ಅ", "ಇ", "ಉ", "ಬ", "ಹ", "ಗ", "ದ", "ಜ", "ಡ", "ಶ"},
+		{"ಎ", "ಒ", "ರ", "ಕ", "ತ", "ಚ", "ಟ", "ಪ", "ಯ", "ಸ", "ಮ", "ವ", "ಲ", "ಷ", "ನ"},
+	},
+	"gurmukhi": {
+		{"ਔ", "ਐ", "ਆ", "ਈ", "ਊ", "ਭ", "ਙ", "ਘ", "ਧ", "ਝ", "ਢ", "ਞ"},
+		{"ਓ", "ਏ", "ਅ", "ਇ", "ਉ", "ਬ", "ਹ", "ਗ", "ਦ", "ਜ", "ਡ", "ਸ਼"},
+		{"ਰ", "ਕ", "ਤ", "ਚ", "ਟ", "ਪ", "ਯ", "ਸ", "ਮ", "ਵ", "ਲ", "ਣ", "ਨ"},
+	},
+	"geez": {
+		{"ሀ", "ለ", "ሐ", "መ", "ሠ", "ረ", "ሰ", "ሸ", "ቀ", "በ", "ተ"},
+		{"ቸ", "ኀ", "ነ", "ኘ", "አ", "ከ", "ኸ", "ወ", "ዐ", "ዘ", "ዠ"},
+		{"የ", "ደ", "ጀ", "ገ", "ጠ", "ጨ", "ጰ", "ጸ", "ፀ", "ፈ", "ፐ"},
+	},
 }
 
 // langLayoutMap overrides script-detection for languages that use a non-default layout.
@@ -84,9 +104,11 @@ var keyboardLayouts = map[string][][]string{
 // French/German use azerty/qwertz which are pure rearrangements of the same
 // ASCII letters as qwerty — detectLayout has no unique chars to key off, so
 // these must stay manual. Everything else (nordic, turkish, devanagari,
-// korean, hiragana, ...) has distinguishing chars and auto-detects fine.
+// korean, hiragana, ...) has distinguishing chars outside qwerty's 26 letters
+// and auto-detects fine.
 var langLayoutMap = map[string]string{
 	"French": "azerty", "German": "qwertz",
+	"Amharic": "geez", "Tigrinya": "geez",
 }
 
 // detectLayout picks the preset layout that covers the most characters found in
@@ -121,16 +143,24 @@ func detectLayout(words map[string]string) string {
 		layoutKeys[name] = s
 	}
 
-	best, bestCount := "qwerty", -1
+	// qwerty is the default: only switch to another layout if it covers chars
+	// that qwerty doesn't (e.g. æ, ğ, й). Layouts like nordic/turkish are supersets
+	// of qwerty's 26 letters, so plain-overlap scoring would tie on English/Spanish/etc
+	// and pick whichever layout the map happened to iterate to first.
+	qwertyKeys := layoutKeys["qwerty"]
+	best, bestDistinct := "qwerty", 0
 	for name, keys := range layoutKeys {
-		count := 0
+		if name == "qwerty" {
+			continue
+		}
+		distinct := 0
 		for ch := range chars {
-			if keys[ch] {
-				count++
+			if keys[ch] && !qwertyKeys[ch] {
+				distinct++
 			}
 		}
-		if count > bestCount {
-			best, bestCount = name, count
+		if distinct > bestDistinct {
+			best, bestDistinct = name, distinct
 		}
 	}
 	return best
