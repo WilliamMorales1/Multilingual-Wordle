@@ -1,5 +1,5 @@
 // service worker: caching for PWA so it can work offline
-const CACHE = 'wordle-v1';
+const CACHE = 'wordgo-v1';
 const STATIC = ['/', '/frontend/script.js', '/frontend/style.css'];
 
 self.addEventListener('install', e => {
