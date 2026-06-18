@@ -5,9 +5,21 @@ import "sort"
 const logographicThreshold = 200
 
 var keyboardLayouts = map[string][][]string{
-	"qwerty": {{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"}, {"a", "s", "d", "f", "g", "h", "j", "k", "l"}, {"z", "x", "c", "v", "b", "n", "m"}},
-	"azerty": {{"a", "z", "e", "r", "t", "y", "u", "i", "o", "p"}, {"q", "s", "d", "f", "g", "h", "j", "k", "l", "m"}, {"w", "x", "c", "v", "b", "n"}},
-	"qwertz": {{"q", "w", "e", "r", "t", "z", "u", "i", "o", "p"}, {"a", "s", "d", "f", "g", "h", "j", "k", "l"}, {"y", "x", "c", "v", "b", "n", "m"}},
+	"qwerty": {
+		{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
+		{"a", "s", "d", "f", "g", "h", "j", "k", "l"},
+		{"z", "x", "c", "v", "b", "n", "m"},
+	},
+	"azerty": {
+		{"a", "z", "e", "r", "t", "y", "u", "i", "o", "p"},
+		{"q", "s", "d", "f", "g", "h", "j", "k", "l", "m"},
+		{"w", "x", "c", "v", "b", "n"},
+	},
+	"qwertz": {
+		{"q", "w", "e", "r", "t", "z", "u", "i", "o", "p"},
+		{"a", "s", "d", "f", "g", "h", "j", "k", "l"},
+		{"y", "x", "c", "v", "b", "n", "m"},
+	},
 	"nordic": {
 		{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "å"},
 		{"a", "s", "d", "f", "g", "h", "j", "k", "l", "ø", "æ"},
@@ -24,7 +36,7 @@ var keyboardLayouts = map[string][][]string{
 		{"я", "ч", "с", "м", "и", "т", "ь", "б", "ю"},
 	},
 	"greek": {
-		{"ε", "ρ", "τ", "υ", "θ", "ι", "ο", "π"},
+		{"ς", "ε", "ρ", "τ", "υ", "θ", "ι", "ο", "π"},
 		{"α", "σ", "δ", "φ", "γ", "η", "ξ", "κ", "λ"},
 		{"ζ", "χ", "ψ", "ω", "β", "ν", "μ"},
 	},
@@ -59,9 +71,9 @@ var keyboardLayouts = map[string][][]string{
 		{"ఎ", "ఒ", "ర", "క", "త", "చ", "ట", "ప", "య", "స", "మ", "వ", "ల", "ష", "న"},
 	},
 	"thai": {
-		{"โ", "ฌ", "ฆ", "ฏ", "โ", "ซ", "ศ", "ฮ", "?", "ฒ", "ฬ", "ฦ"},
-		{"ฟ", "ห", "ก", "ด", "เ", "า", "ส", "ว", "ง", "ผ", "ป", "แ", "อ"},
-		{"พ", "ะ", "ั", "ร", "น", "ย", "บ", "ล", "ข", "ช", "ต", "ค", "ม"},
+		{"ฌ", "ฆ", "ฏ", "ซ", "ศ", "ฮ", "ฒ", "ฬ", "ฦ"},
+		{"ฟ", "ห", "ก", "ด", "า", "ส", "ว", "ง", "ผ", "ป", "แ", "อ"},
+		{"พ", "ร", "น", "ย", "บ", "ล", "ข", "ช", "ต", "ค", "ม"},
 	},
 	"hiragana": {
 		{"わ", "ら", "や", "ま", "は", "な", "た", "さ", "か", "あ"},
@@ -71,7 +83,7 @@ var keyboardLayouts = map[string][][]string{
 		{"を", "ろ", "よ", "も", "ほ", "の", "と", "そ", "こ", "お"},
 	},
 	"korean": {
-		{"ㅂ", "ㅈ", "ㄷ", "ㄱ", "ㅅ", "ㅛ", "ㅕ", "ㅑ", "ㅐ", "ㅒ", "ㅔ", "ㅖ"},
+		{"ㅂ", "ㅈ", "ㄷ", "ㄱ", "ㅅ", "ㅛ", "ㅕ", "ㅑ", "ㅐ", "ㅔ"},
 		{"ㅁ", "ㄴ", "ㅇ", "ㄹ", "ㅎ", "ㅗ", "ㅓ", "ㅏ", "ㅣ"},
 		{"ㅋ", "ㅌ", "ㅊ", "ㅍ", "ㅠ", "ㅜ", "ㅡ"},
 	},
@@ -95,6 +107,42 @@ var keyboardLayouts = map[string][][]string{
 		{"ቸ", "ኀ", "ነ", "ኘ", "አ", "ከ", "ኸ", "ወ", "ዐ", "ዘ", "ዠ"},
 		{"የ", "ደ", "ጀ", "ገ", "ጠ", "ጨ", "ጰ", "ጸ", "ፀ", "ፈ", "ፐ"},
 	},
+	"georgian": {
+		{"ქ", "წ", "ე", "რ", "ტ", "ყ", "უ", "ი", "ო", "პ"},
+		{"ა", "ს", "დ", "ფ", "გ", "ჰ", "ჯ", "კ", "ლ"},
+		{"ძ", "ხ", "ც", "ვ", "ბ", "ნ", "მ"},
+	},
+	"armenian": {
+		{"Խ", "Ւ", "Է", "Ր", "Տ", "Ե", "Ը", "Ի", "Ո", "Պ", "Չ", "Ջ"},
+		{"Ա", "Ս", "Դ", "Ֆ", "Ք", "Հ", "Ճ", "Կ", "Լ", "Թ", "Փ"},
+		{"Զ", "Ց", "Գ", "Վ", "Բ", "Ն", "Մ", "Շ", "Ղ", "Ծ"},
+	},
+	"cherokee": {
+		{"Ꭰ", "Ꭱ", "Ꭲ", "Ꭳ", "Ꭴ", "Ꭵ", "Ꭶ", "Ꭷ", "Ꭸ", "Ꭹ"},
+		{"Ꭺ", "Ꭻ", "Ꭼ", "Ꭽ", "Ꭾ", "Ꭿ", "Ꮀ", "Ꮁ", "Ꮂ", "Ꮃ"},
+		{"Ꮄ", "Ꮅ", "Ꮆ", "Ꮇ", "Ꮈ", "Ꮉ", "Ꮊ", "Ꮋ", "Ꮌ", "Ꮍ"},
+		{"Ꮎ", "Ꮏ", "Ꮐ", "Ꮑ", "Ꮒ", "Ꮓ", "Ꮔ", "Ꮕ", "Ꮖ", "Ꮗ"},
+		{"Ꮘ", "Ꮙ", "Ꮚ", "Ꮛ", "Ꮜ", "Ꮝ", "Ꮞ", "Ꮟ", "Ꮠ", "Ꮡ"},
+		{"Ꮢ", "Ꮣ", "Ꮤ", "Ꮥ", "Ꮦ", "Ꮧ", "Ꮨ", "Ꮩ", "Ꮪ", "Ꮫ"},
+		{"Ꮬ", "Ꮭ", "Ꮮ", "Ꮯ", "Ꮰ", "Ꮱ", "Ꮲ", "Ꮳ", "Ꮴ", "Ꮵ"},
+		{"Ꮶ", "Ꮷ", "Ꮸ", "Ꮹ", "Ꮺ", "Ꮻ", "Ꮼ", "Ꮽ", "Ꮾ", "Ꮿ"},
+		{"Ᏸ", "Ᏹ", "Ᏺ", "Ᏻ", "Ᏼ"},
+	},
+	"syllabics": {
+		{"ᐊ", "ᐃ", "ᐅ"},
+		{"ᐸ", "ᑕ", "ᑲ", "ᒐ", "ᒪ", "ᓇ"},
+		{"ᓴ", "ᔭ", "ᕒ", "ᓚ"},
+	},
+	"thaana": {
+		{"ޤ", "ވ", "އ", "ރ", "ތ", "ޔ", "ޕ"},
+		{"ސ", "ދ", "ފ", "ގ", "ހ", "ޖ", "ކ", "ލ"},
+		{"ޒ", "ޚ", "ޛ", "ވ", "ބ", "ނ", "މ", "ށ", "ޏ"},
+	},
+	"osage": {
+		{"𐒰", "𐒱", "𐒲", "𐒳", "𐒴", "𐒵", "𐒶", "𐒷", "𐒸", "𐒹", "𐒺", "𐒻"},
+		{"𐒼", "𐒽", "𐒾", "𐒿", "𐓀", "𐓁", "𐓂", "𐓃", "𐓄", "𐓅", "𐓆", "𐓇"},
+		{"𐓈", "𐓉", "𐓊", "𐓋", "𐓌", "𐓍", "𐓎", "𐓏", "𐓐", "𐓑", "𐓒", "𐓓"},
+	},
 }
 
 // langLayoutMap overrides script-detection for languages whose alphabet is a pure
@@ -102,7 +150,7 @@ var keyboardLayouts = map[string][][]string{
 // detectLayout has no unique chars to key off in that case. Keep this list small —
 // every other layout has distinguishing chars and auto-detects fine.
 var langLayoutMap = map[string]string{
-	"French": "azerty", "German": "qwertz",
+	"English": "qwerty", "French": "azerty", "German": "qwertz",
 	"Amharic": "geez", "Tigrinya": "geez",
 }
 
@@ -294,17 +342,6 @@ func computeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 	return result
 }
 
-func isRTL(alphabet []string) bool {
-	for _, ch := range alphabet {
-		for _, r := range ch {
-			if (r >= 0x0600 && r <= 0x06FF) || (r >= 0x05D0 && r <= 0x05EA) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // buildGameExtras computes all derived UI data from the alphabet in one call.
 func buildGameExtras(alphabet []string, lang string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool) {
 	var placedExact map[string]bool
@@ -314,6 +351,18 @@ func buildGameExtras(alphabet []string, lang string, words map[string]string) (k
 		overflowSet[b] = true
 	}
 	equivalences = computeEquivalences(alphabet, overflowSet, placedExact)
-	rtl = isRTL(alphabet)
+
+	layoutName := langLayoutMap[lang]
+	if layoutName == "" {
+		layoutName = detectLayout(words)
+	}
+
+	// this is so it is displayed ltr even if there are some in a rtl script in * chars
+	if layoutName == "arabic" || layoutName == "hebrew" {
+		rtl = true
+	} else {
+		rtl = false
+	}
+
 	return
 }

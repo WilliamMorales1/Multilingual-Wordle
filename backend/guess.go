@@ -175,14 +175,44 @@ func normalizeKanaRune(r rune) rune {
 	return r
 }
 
+// normalizeSyllabicsRune maps Canadian Aboriginal Syllabics consonant+vowel
+// glyphs to the canonical "a"-vowel form of the same consonant, so the
+// keyboard shows one key per consonant regardless of vowel.
+func normalizeSyllabicsRune(r rune) rune {
+	switch r {
+	case 'ᐱ', 'ᐯ', 'ᐳ':
+		return 'ᐸ'
+	case 'ᑎ', 'ᑐ':
+		return 'ᑕ'
+	case 'ᑭ', 'ᑯ':
+		return 'ᑲ'
+	case 'ᒋ', 'ᒍ':
+		return 'ᒐ'
+	case 'ᒥ', 'ᒧ':
+		return 'ᒪ'
+	case 'ᓂ', 'ᓄ':
+		return 'ᓇ'
+	case 'ᓭ', 'ᓯ', 'ᓱ':
+		return 'ᓴ'
+	case 'ᔨ', 'ᔪ':
+		return 'ᔭ'
+	case 'ᕆ', 'ᕈ':
+		return 'ᕒ'
+	case 'ᓕ', 'ᓗ':
+		return 'ᓚ'
+	}
+	return r
+}
+
 // normalizeChar strips diacritical marks and lowercases a grapheme cluster.
 // Enables accent-insensitive comparison: é→e, ñ→n, ü→u.
 // For kana: small variants collapse to large (っ→つ), and dakuten/handakuten
 // are stripped via NFD so voiced forms match their base (が→か, ぱ→は).
+// For syllabics: vowel variants of the same consonant collapse to the "a" form.
 func normalizeChar(ch string) string {
 	var pre strings.Builder
 	for _, r := range ch {
-		pre.WriteRune(normalizeKanaRune(r))
+		pre.WriteRune(normalizeSyllabicsRune(normalizeKanaRune(r)))
 	}
 	nfd := norm.NFD.String(pre.String())
 	var buf strings.Builder

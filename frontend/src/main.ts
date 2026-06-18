@@ -78,17 +78,8 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     input!.value = lang;
     options!.hidden = true;
     activeIdx = -1;
-    applyAvgLength(lang);
-  }
-
-  function applyAvgLength(lang: string): void {
     const lengthInput = document.getElementById('lengthInput') as HTMLInputElement | null;
-    if (!lengthInput) return;
-    api.avgLength(lang)
-      .then(data => {
-        if (data.avg_length > 0) lengthInput.value = String(Math.round(data.avg_length));
-      })
-      .catch(() => {});
+    if (lengthInput) lengthInput.value = '5';
   }
 
   function setActive(idx: number): void {

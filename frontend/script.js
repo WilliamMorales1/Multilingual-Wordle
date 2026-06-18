@@ -33,7 +33,6 @@
   }
   var api = {
     languages: () => apiFetch("/api/languages"),
-    avgLength: (lang) => apiFetch(`/api/avglength?lang=${encodeURIComponent(lang)}`),
     newGame: (b) => apiFetch("/api/game", { method: "POST", body: JSON.stringify(b) }),
     guess: (id, word) => apiFetch(`/api/game/${id}/guess`, { method: "POST", body: JSON.stringify({ word }) }),
     stats: (lang, len) => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
@@ -516,15 +515,8 @@
       input.value = lang;
       options.hidden = true;
       activeIdx = -1;
-      applyAvgLength(lang);
-    }
-    function applyAvgLength(lang) {
       const lengthInput = document.getElementById("lengthInput");
-      if (!lengthInput) return;
-      api.avgLength(lang).then((data) => {
-        if (data.avg_length > 0) lengthInput.value = String(Math.round(data.avg_length));
-      }).catch(() => {
-      });
+      if (lengthInput) lengthInput.value = "5";
     }
     function setActive(idx) {
       const opts = options.querySelectorAll(".lang-option");

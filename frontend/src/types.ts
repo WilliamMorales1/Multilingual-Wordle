@@ -55,10 +55,6 @@ export interface LanguagesResult {
   languages: string[];
 }
 
-export interface AvgLengthResult {
-  avg_length: number;
-}
-
 export interface NewGameRequest {
   lang: string;
   length: number;

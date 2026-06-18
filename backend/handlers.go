@@ -383,15 +383,6 @@ func handleGetLanguages(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"languages": getCachedLanguages()})
 }
 
-// GET /api/avglength?lang=X
-func handleGetAvgLength(w http.ResponseWriter, r *http.Request) {
-	lang := r.URL.Query().Get("lang")
-	if lang == "" {
-		lang = DefaultLang
-	}
-	jsonOK(w, map[string]any{"avg_length": avgWordLengths[lang]})
-}
-
 // GET /api/progress?lang=X&length=Y
 func handleGetProgress(w http.ResponseWriter, r *http.Request) {
 	lang := r.URL.Query().Get("lang")

@@ -60,6 +60,21 @@ header h1 {
     transition: background 0.15s;
 }
 .icon-btn:hover { background: var(--border); }
+.icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+}
+.icon-cache-clean      { mask-image: url(/frontend/icons/cache-clean.svg);      -webkit-mask-image: url(/frontend/icons/cache-clean.svg); }
+.icon-stats             { mask-image: url(/frontend/icons/stats.svg);            -webkit-mask-image: url(/frontend/icons/stats.svg); }
+.icon-settings-sliders  { mask-image: url(/frontend/icons/settings-sliders.svg); -webkit-mask-image: url(/frontend/icons/settings-sliders.svg); }
 
 /* ── Toast ────────────────────────────────────────────────── */
 #toast {

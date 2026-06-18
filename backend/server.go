@@ -30,7 +30,6 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/languages", handleGetLanguages)
-	mux.HandleFunc("GET /api/avglength", handleGetAvgLength)
 	mux.HandleFunc("GET /api/progress", handleGetProgress)
 	mux.HandleFunc("POST /api/game", handleNewGame)
 	mux.HandleFunc("GET /api/game/{id}", handleGetGame)
