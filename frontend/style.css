@@ -8,10 +8,10 @@
     --border:    #3a3a3c;
     --text:      #ffffff;
     --subtext:   #818384;
-    --correct:   #538d4e;
+    --correct:   #6aaa64;
     --present:   #c9b458;
-    --absent:    #2a2a2c;
-    --key-bg:    #9a9a9b;
+    --absent:    #3a3a3c;
+    --key-bg:    #818384;
     --key-text:  #ffffff;
     --tile-size: 62px;
     --gap:        5px;
@@ -106,13 +106,12 @@ header h1 {
 }
 #board {
     display: grid;
-    gap: var(--gap);
+    column-gap: var(--gap);
 }
 .board-row-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
 }
 .board-row {
     display: grid;
