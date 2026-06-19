@@ -61,10 +61,10 @@ func handleClearCache(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	var keep string
+	var keep wlKey
 	if req.GameID != 0 {
 		if game, err := dbGetGame(req.GameID); err == nil && game.Status == "playing" {
-			keep = fmt.Sprintf("%s:%d", game.Lang, game.WordLength)
+			keep = wlKey{game.Lang, game.WordLength}
 		}
 	}
 
