@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,12 +38,21 @@ func dataPath(name string) string {
 }
 
 type KaikkiEntry struct {
-	Word      string           `json:"word"`
-	Lang      string           `json:"lang"`
-	Pos       string           `json:"pos"`
-	Senses    []map[string]any `json:"senses"`
-	Sounds    []KaikkiSound    `json:"sounds"`
-	Etymology string           `json:"etymology_text"`
+	Word          string               `json:"word"`
+	Lang          string               `json:"lang"`
+	Pos           string               `json:"pos"`
+	Senses        []map[string]any     `json:"senses"`
+	Sounds        []KaikkiSound        `json:"sounds"`
+	Etymology     string               `json:"etymology_text"`
+	HeadTemplates []KaikkiHeadTemplate `json:"head_templates"`
+}
+
+// KaikkiHeadTemplate carries the "Han char" infobox template on Translingual
+// character entries — Expansion's prose embeds the Cangjie root-glyph code
+// (e.g. "...Cangjie input 女弓木 (VND)..."), Args["canj"] its ASCII-letter form.
+type KaikkiHeadTemplate struct {
+	Args      map[string]string `json:"args"`
+	Expansion string            `json:"expansion"`
 }
 
 // excludedSenseTags marks senses that identify a word as a proper noun,
@@ -85,7 +95,50 @@ type KaikkiSound struct {
 // matching this name against a sound entry's tags (e.g. "Cantonese", "Hokkien").
 var chineseDialects = []string{
 	"Mandarin", "Cantonese", "Hokkien", "Teochew", "Hakka", "Wu",
-	"Min Bei", "Min Dong", "Gan", "Xiang", "Jin",
+	"Min Bei", "Min Dong", "Gan", "Xiang", "Jin", "Cangjie", "Zhuyin",
+}
+
+// cangjieDialect names the pseudo-dialect whose "romanization" is each hanzi
+// character's Cangjie input code (looked up via cangjieTable) rather than a
+// spoken pronunciation pulled from a sound entry's zh_pron tags.
+const cangjieDialect = "Cangjie"
+
+// zhuyinDialect names the pseudo-dialect whose "romanization" is Mandarin's
+// Zhuyin (Bopomofo) transcription, pulled from a sound entry tagged
+// "Bopomofo" rather than matched by dialect name like romanizeEntry does.
+const zhuyinDialect = "Zhuyin"
+
+// zhuyinRomanize returns an entry's Mandarin Bopomofo reading (e.g. "ㄡ ㄎㄟˋ"),
+// or "" if absent. Tone marks (ˊˇˋ˙) are spacing modifier-letter runes, not
+// combining marks, so WordChars already splits them into their own tile
+// without any special tone-handling — only the syllable separators (spaces)
+// need stripping, done by zhuyinify.
+func zhuyinRomanize(entry KaikkiEntry) string {
+	for _, s := range entry.Sounds {
+		if s.ZhPron == "" {
+			continue
+		}
+		hasMandarin, hasBopomofo := false, false
+		for _, t := range s.Tags {
+			switch {
+			case strings.EqualFold(t, "Mandarin"):
+				hasMandarin = true
+			case strings.EqualFold(t, "Bopomofo"):
+				hasBopomofo = true
+			}
+		}
+		if hasMandarin && hasBopomofo {
+			return s.ZhPron
+		}
+	}
+	return ""
+}
+
+// zhuyinify strips the space/hyphen syllable separators from a Bopomofo
+// reading, concatenating its syllables (each already ending in its own tone
+// mark, or no mark for first tone) into one guessable string.
+func zhuyinify(rom string) string {
+	return strings.Join(strings.FieldsFunc(rom, func(r rune) bool { return r == ' ' || r == '-' }), "")
 }
 
 // parseChineseDialect extracts the dialect name from a "Chinese (X)" pseudo-language.
@@ -151,9 +204,158 @@ func firstGloss(entry KaikkiEntry) string {
 	return ""
 }
 
+// cangjieTableCachePath caches the hanzi->Cangjie-code table, which is
+// independent of word length so it's only ever fetched once.
+func cangjieTableCachePath() string {
+	dir := dataPath("cache")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "cangjie_table.json")
+}
+
+// cangjieGlossPattern catches "Cangjie input <glyphs> (<CODE>)" embedded in a
+// character entry's head-template expansion or gloss prose — <glyphs> is the
+// sequence of root characters (one per <CODE> letter) that the on-screen
+// Cangjie keyboard actually displays and that guesses are checked against.
+var cangjieGlossPattern = regexp.MustCompile(`Cangjie input (\S+) \(([A-Z]+)\)`)
+
+// cangjieLetterGlyphs is the fixed 24-key Cangjie root-letter assignment
+// (A-Y, no X — see https://en.wikipedia.org/wiki/Cangjie_input_method),
+// used only as a fallback when an entry's "canj" arg has no parseable
+// expansion/gloss text to pull the root glyphs from directly.
+var cangjieLetterGlyphs = map[byte]string{
+	'A': "日", 'B': "月", 'C': "金", 'D': "木", 'E': "水", 'F': "火", 'G': "土",
+	'H': "竹", 'I': "戈", 'J': "十", 'K': "大", 'L': "中", 'M': "一", 'N': "弓",
+	'O': "人", 'P': "心", 'Q': "手", 'R': "口", 'S': "尸", 'T': "廿", 'U': "山",
+	'V': "女", 'W': "田", 'X': "難", 'Y': "卜",
+}
+
+// cangjieGlyphsFromCode converts an ASCII-letter Cangjie code (e.g. "VND")
+// into its root-glyph form (e.g. "女弓木") via cangjieLetterGlyphs.
+func cangjieGlyphsFromCode(code string) string {
+	var b strings.Builder
+	for i := 0; i < len(code); i++ {
+		glyph, ok := cangjieLetterGlyphs[code[i]]
+		if !ok {
+			return ""
+		}
+		b.WriteString(glyph)
+	}
+	return b.String()
+}
+
+// cangjieCodeFromEntry extracts a character entry's Cangjie code as root
+// glyphs, preferring the head-template/gloss prose (authoritative — kaikki's
+// glyph rendering occasionally diverges from the textbook letter assignment)
+// and falling back to converting the structured "canj" arg via the static
+// letter table.
+func cangjieCodeFromEntry(entry KaikkiEntry) string {
+	for _, ht := range entry.HeadTemplates {
+		if m := cangjieGlossPattern.FindStringSubmatch(ht.Expansion); m != nil {
+			return m[1]
+		}
+	}
+	for _, sense := range entry.Senses {
+		glosses, ok := sense["glosses"].([]any)
+		if !ok {
+			continue
+		}
+		for _, g := range glosses {
+			gloss, ok := g.(string)
+			if !ok {
+				continue
+			}
+			if m := cangjieGlossPattern.FindStringSubmatch(gloss); m != nil {
+				return m[1]
+			}
+		}
+	}
+	for _, ht := range entry.HeadTemplates {
+		if code := strings.ToUpper(ht.Args["canj"]); code != "" {
+			if glyphs := cangjieGlyphsFromCode(code); glyphs != "" {
+				return glyphs
+			}
+		}
+	}
+	return ""
+}
+
+// loadCangjieTable returns a per-character hanzi -> root-glyph Cangjie code
+// map (e.g. "好" -> "女弓木"), sourced from kaikki.org's Translingual dump.
+// Covers every length; callers filter down to the requested word length.
+func loadCangjieTable() (map[string]string, error) {
+	cf := cangjieTableCachePath()
+	if data, err := os.ReadFile(cf); err == nil {
+		var cached map[string]string
+		if err := json.Unmarshal(data, &cached); err == nil && len(cached) > 0 {
+			return cached, nil
+		}
+	}
+
+	u := kaikkiURL("Translingual")
+	log.Printf("Downloading Translingual wiktextract dump from %s for Cangjie codes", u)
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+
+	table := make(map[string]string)
+	scanner := bufio.NewScanner(gz)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		var entry KaikkiEntry
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
+			continue
+		}
+		if entry.Lang != "Translingual" || entry.Pos != "character" || len([]rune(entry.Word)) != 1 {
+			continue
+		}
+		if _, exists := table[entry.Word]; exists {
+			continue
+		}
+		if code := cangjieCodeFromEntry(entry); code != "" {
+			table[entry.Word] = code
+		}
+	}
+	if err := scanner.Err(); err != nil && len(table) < 100 {
+		return nil, err
+	}
+
+	if data, err := json.Marshal(table); err == nil {
+		if err := os.WriteFile(cf, data, 0644); err != nil {
+			log.Printf("Warning: failed to write cangjie table cache %s: %v", cf, err)
+		}
+	}
+	log.Printf("%d Cangjie character codes collected", len(table))
+	return table, nil
+}
+
+// cangjieWord looks up a single hanzi character's root-glyph Cangjie code.
+// Cangjie listings are single-character only — codes for different
+// characters span 1-5 tiles, so "word" here is always one hanzi, never a
+// multi-character dictionary word.
+func cangjieWord(hanzi string, table map[string]string) string {
+	if len([]rune(hanzi)) != 1 {
+		return ""
+	}
+	code, ok := table[hanzi]
+	if !ok {
+		return ""
+	}
+	return code
+}
+
 // streamURL downloads and parses a gzipped JSONL word dump from kaikki.org.
 // Parsing is parallelised across CPU workers while the scanner streams the download.
-func streamURL(rawURL, lng, dialect string, length int, toneLang string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
+func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, nil, nil, err
@@ -188,7 +390,23 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, onProgr
 					continue
 				}
 				var word, hanzi string
-				if dialect != "" {
+				if dialect == cangjieDialect {
+					word = cangjieWord(entry.Word, cangjieTable)
+					if word == "" {
+						continue
+					}
+					hanzi = entry.Word
+				} else if dialect == zhuyinDialect {
+					rom := zhuyinRomanize(entry)
+					if rom == "" {
+						continue
+					}
+					word = zhuyinify(rom)
+					if word == "" {
+						continue
+					}
+					hanzi = entry.Word
+				} else if dialect != "" {
 					rom := romanizeEntry(entry, dialect)
 					if rom == "" {
 						continue
@@ -310,13 +528,22 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 		dialect = d
 	}
 
+	var cangjieTable map[string]string
+	if dialect == cangjieDialect {
+		var err error
+		cangjieTable, err = loadCangjieTable()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
 	u := kaikkiURL(matchLang)
 	log.Printf("Downloading %s wiktextract dump from %s", matchLang, u)
 
 	toneLang := lang.ToneSplitKind(lng)
 
 	key := fmt.Sprintf("%s:%d", lng, length)
-	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, toneLang, func(n int) {
+	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, toneLang, cangjieTable, func(n int) {
 		DownloadProgress.Store(key, n)
 	})
 	DownloadProgress.Delete(key)

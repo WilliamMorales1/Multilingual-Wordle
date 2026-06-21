@@ -173,10 +173,28 @@ var keyboardLayouts = map[string][][]string{
 		{"z", "x", "c", "ü", "b", "n", "m"},
 		{lang.TonePing, lang.ToneShang, lang.ToneQu, lang.ToneRu}, // 平 上 去 入
 	},
+	// Cangjie's 24 root-glyph keys, laid out at the same qwerty physical
+	// positions a real Cangjie keyboard prints them at (A-Y, no X/Z). Each
+	// tile holds one root glyph of a character's code (1-5 glyphs per hanzi).
+	"cangjie": {
+		{"手", "田", "水", "口", "廿", "卜", "山", "戈", "人", "心"},
+		{"日", "尸", "木", "火", "土", "竹", "十", "大", "中"},
+		{"金", "女", "月", "弓", "一"},
+	},
+	// Standard 大千式 (Dachen) Zhuyin keyboard: initials/finals at their usual
+	// physical qwerty position, tone marks (2nd/3rd/4th/neutral) on their own
+	// row — 1st tone carries no mark, so it has no key (and no tile).
+	"zhuyin": {
+		{"ㄅ", "ㄉ", "ㄓ", "ㄚ", "ㄞ", "ㄢ", "ㄦ"},
+		{"ㄆ", "ㄊ", "ㄍ", "ㄐ", "ㄔ", "ㄗ", "ㄧ", "ㄛ", "ㄟ", "ㄣ"},
+		{"ㄇ", "ㄋ", "ㄎ", "ㄑ", "ㄕ", "ㄙ", "ㄨ", "ㄜ", "ㄠ", "ㄤ"},
+		{"ㄈ", "ㄌ", "ㄏ", "ㄒ", "ㄖ", "ㄘ", "ㄩ", "ㄝ", "ㄡ", "ㄥ"},
+		{"ˊ", "ˇ", "ˋ", "˙"}, // 2nd, 3rd, 4th, neutral tone
+	},
 }
 
 func isSyllabary(keyboardLayout string) bool {
-	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "chinese"}
+	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "chinese", "cangjie"}
 	if slices.Contains(marked, keyboardLayout) {
 		return true
 	}
@@ -193,6 +211,12 @@ func resolveLayoutOverride(lng string) string {
 	if strings.EqualFold(lng, "Vietnamese") {
 		return "vietnamese"
 	}
+	if strings.EqualFold(lng, "Chinese (Cangjie)") {
+		return "cangjie"
+	}
+	if strings.EqualFold(lng, "Chinese (Zhuyin)") {
+		return "zhuyin"
+	}
 	if strings.EqualFold(lng, "Chinese") || strings.HasPrefix(lng, "Chinese (") {
 		return "chinese"
 	}
@@ -200,10 +224,14 @@ func resolveLayoutOverride(lng string) string {
 }
 
 // DefaultLengthForLang picks the default word length before the word list is
-// fetched: 3 for syllabary-style layouts (each "letter" carries more info,
-// e.g. tone marks occupy their own tile), 6 otherwise.
+// fetched: 4 for Cangjie (average root-glyph code length per character), 3
+// for other syllabary-style layouts (each "letter" carries more info, e.g.
+// tone marks occupy their own tile), 6 otherwise.
 func DefaultLengthForLang(lng string) int {
 	name := resolveLayoutOverride(lng)
+	if name == "cangjie" {
+		return 4
+	}
 	if name != "" && isSyllabary(name) {
 		return 3
 	}
