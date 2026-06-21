@@ -1,9 +1,12 @@
-package main
+// Package store persists games and guesses to a SQLite database.
+package store
 
 import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -11,7 +14,18 @@ import (
 
 var db *sql.DB
 
-func initDB() {
+// dataPath resolves name relative to DATA_DIR (or the working directory if unset).
+func dataPath(name string) string {
+	dir := os.Getenv("DATA_DIR")
+	if dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, name)
+}
+
+// Init opens (and migrates) the SQLite database. It is fatal on failure since
+// the server can't run without persistence.
+func Init() {
 	var err error
 	db, err = sql.Open("sqlite", dataPath("wordgo.db"))
 	if err != nil {
@@ -49,7 +63,7 @@ func createTables() error {
 	return err
 }
 
-func dbCreateGame(g *Game) error {
+func CreateGame(g *Game) error {
 	res, err := db.Exec(
 		`INSERT INTO games (lang, word_length, max_guesses, answer, status) VALUES (?, ?, ?, ?, ?)`,
 		g.Lang, g.WordLength, g.MaxGuesses, g.Answer, g.Status,
@@ -65,7 +79,7 @@ func dbCreateGame(g *Game) error {
 	return nil
 }
 
-func dbGetGame(id uint) (*Game, error) {
+func GetGame(id uint) (*Game, error) {
 	g := &Game{}
 	err := db.QueryRow(
 		`SELECT id, lang, word_length, max_guesses, answer, status FROM games WHERE id = ?`, id,
@@ -92,7 +106,7 @@ func dbGetGame(id uint) (*Game, error) {
 	return g, rows.Err()
 }
 
-func dbCreateGuess(r *GuessRecord) error {
+func CreateGuess(r *GuessRecord) error {
 	res, err := db.Exec(
 		`INSERT INTO guess_records (game_id, attempt, word, states) VALUES (?, ?, ?, ?)`,
 		r.GameID, r.Attempt, r.Word, r.States,
@@ -108,12 +122,12 @@ func dbCreateGuess(r *GuessRecord) error {
 	return nil
 }
 
-func dbUpdateGameStatus(id uint, status string) error {
+func UpdateGameStatus(id uint, status string) error {
 	_, err := db.Exec(`UPDATE games SET status = ? WHERE id = ?`, status, id)
 	return err
 }
 
-func dbGetCompletedGames(lang string, length int) ([]Game, error) {
+func GetCompletedGames(lang string, length int) ([]Game, error) {
 	query := `SELECT id, status FROM games WHERE status IN ('won', 'lost')`
 	args := []any{}
 	if lang != "" {
@@ -143,7 +157,7 @@ func dbGetCompletedGames(lang string, length int) ([]Game, error) {
 	return games, rows.Err()
 }
 
-func dbGetGuessDistribution(wonIDs []uint) (map[int]int, error) {
+func GetGuessDistribution(wonIDs []uint) (map[int]int, error) {
 	if len(wonIDs) == 0 {
 		return make(map[int]int), nil
 	}

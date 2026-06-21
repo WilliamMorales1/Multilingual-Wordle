@@ -1,13 +1,20 @@
-package main
+// Package api implements the HTTP handlers for the Wordgo game API.
+package api
 
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"wordgo/internal/keyboard"
+	"wordgo/internal/lang"
+	"wordgo/internal/store"
+	"wordgo/internal/wordlist"
 )
 
 func jsonOK(w http.ResponseWriter, v any) {
@@ -28,55 +35,57 @@ type guessResp struct {
 	States  []string `json:"states"`
 }
 
-func parseGuesses(records []GuessRecord, hanzi map[string]string) []guessResp {
+func parseGuesses(records []store.GuessRecord, hanzi map[string]string) []guessResp {
 	out := make([]guessResp, 0, len(records))
 	for _, r := range records {
 		var states []string
-		_ = json.Unmarshal([]byte(r.States), &states)
+		if err := json.Unmarshal([]byte(r.States), &states); err != nil {
+			slog.Error("corrupt guess states", "game_id", r.GameID, "attempt", r.Attempt, "error", err)
+		}
 		out = append(out, guessResp{Attempt: r.Attempt, Word: r.Word, Chars: hanzi[r.Word], States: states})
 	}
 	return out
 }
 
 // addAnswerReveal fills in answer/definition/chars/etymology once a game is won or lost.
-func addAnswerReveal(resp map[string]any, game *Game, hanzi map[string]string) {
+func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]string) {
 	resp["answer"] = game.Answer
-	if words, err := getCachedWordList(game.Lang, game.WordLength); err == nil {
+	if words, err := wordlist.GetCachedWordList(game.Lang, game.WordLength); err == nil {
 		resp["definition"] = words[game.Answer]
 	}
 	if chars := hanzi[game.Answer]; chars != "" {
 		resp["answer_chars"] = chars
 	}
-	if ety := getCachedEtymology(game.Lang, game.WordLength)[game.Answer]; ety != "" {
+	if ety := wordlist.GetCachedEtymology(game.Lang, game.WordLength)[game.Answer]; ety != "" {
 		resp["etymology"] = ety
 	}
 }
 
-// POST /api/cache/clear
+// HandleClearCache handles POST /api/cache/clear.
 // If game_id refers to a game still in progress, that game's word list is
 // kept cached so the current game isn't broken mid-play.
-func handleClearCache(w http.ResponseWriter, r *http.Request) {
+func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		GameID uint `json:"game_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	var keep wlKey
+	var keep wordlist.Key
 	if req.GameID != 0 {
-		if game, err := dbGetGame(req.GameID); err == nil && game.Status == "playing" {
-			keep = wlKey{game.Lang, game.WordLength}
+		if game, err := store.GetGame(req.GameID); err == nil && game.Status == "playing" {
+			keep = wordlist.Key{Lang: game.Lang, Len: game.WordLength}
 		}
 	}
 
-	if err := clearWordListCache(keep); err != nil {
+	if err := wordlist.ClearWordListCache(keep); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, map[string]any{"ok": true})
 }
 
-// POST /api/game
-func handleNewGame(w http.ResponseWriter, r *http.Request) {
+// HandleNewGame handles POST /api/game.
+func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Lang       string `json:"lang"`
 		Length     int    `json:"length"`
@@ -88,13 +97,13 @@ func handleNewGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Lang == "" {
-		req.Lang = DefaultLang
+		req.Lang = wordlist.DefaultLang
 	}
 	if req.Length == 0 {
-		req.Length = DefaultLength
+		req.Length = keyboard.DefaultLengthForLang(req.Lang)
 	}
 	if req.MaxGuesses == 0 {
-		req.MaxGuesses = DefaultGuesses
+		req.MaxGuesses = wordlist.DefaultGuesses
 	}
 	if req.Length < 2 || req.Length > 20 {
 		jsonErr(w, "length must be between 2 and 20", http.StatusBadRequest)
@@ -105,7 +114,7 @@ func handleNewGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	words, err := getCachedWordList(req.Lang, req.Length)
+	words, err := wordlist.GetCachedWordList(req.Lang, req.Length)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -118,22 +127,22 @@ func handleNewGame(w http.ResponseWriter, r *http.Request) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	answer := wordSlice[rng.Intn(len(wordSlice))]
 
-	game := Game{
+	game := store.Game{
 		Lang:       req.Lang,
 		WordLength: req.Length,
 		MaxGuesses: req.MaxGuesses,
 		Answer:     answer,
 		Status:     "playing",
 	}
-	if err := dbCreateGame(&game); err != nil {
-		logger.Error("create game failed", "err", err)
+	if err := store.CreateGame(&game); err != nil {
+		slog.Error("create game failed", "err", err)
 		jsonErr(w, "failed to create game", http.StatusInternalServerError)
 		return
 	}
-	logger.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength, "max_guesses", game.MaxGuesses)
+	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength, "max_guesses", game.MaxGuesses)
 
-	alphabet := buildAlphabet(words)
-	keyboardRows, overflowBases, equivalences, rtl := buildGameExtras(alphabet, req.Lang, words)
+	alphabet := lang.BuildAlphabet(words, lang.ToneSplitKind(req.Lang))
+	keyboardRows, overflowBases, equivalences, rtl := keyboard.BuildGameExtras(alphabet, req.Lang, words)
 	jsonOK(w, map[string]any{
 		"id":             game.ID,
 		"lang":           game.Lang,
@@ -149,15 +158,15 @@ func handleNewGame(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/game/{id}
-func handleGetGame(w http.ResponseWriter, r *http.Request) {
+// HandleGetGame handles GET /api/game/{id}.
+func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	if err != nil {
 		jsonErr(w, "invalid game id", http.StatusBadRequest)
 		return
 	}
 
-	game, err := dbGetGame(uint(id))
+	game, err := store.GetGame(uint(id))
 	if err != nil {
 		jsonErr(w, "game not found", http.StatusNotFound)
 		return
@@ -168,12 +177,12 @@ func handleGetGame(w http.ResponseWriter, r *http.Request) {
 	var overflowBases []string
 	var equivalences [][]string
 	var rtl bool
-	if words := getWordListIfCached(game.Lang, game.WordLength); words != nil {
-		alphabet = buildAlphabet(words)
-		keyboardRows, overflowBases, equivalences, rtl = buildGameExtras(alphabet, game.Lang, words)
+	if words := wordlist.GetWordListIfCached(game.Lang, game.WordLength); words != nil {
+		alphabet = lang.BuildAlphabet(words, lang.ToneSplitKind(game.Lang))
+		keyboardRows, overflowBases, equivalences, rtl = keyboard.BuildGameExtras(alphabet, game.Lang, words)
 	}
 
-	hanzi := getCachedHanzi(game.Lang, game.WordLength)
+	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
 	resp := map[string]any{
 		"id":             game.ID,
 		"lang":           game.Lang,
@@ -188,17 +197,14 @@ func handleGetGame(w http.ResponseWriter, r *http.Request) {
 		"rtl":            rtl,
 	}
 	if game.Status != "playing" {
-		if hanzi == nil {
-			hanzi = getCachedHanzi(game.Lang, game.WordLength)
-		}
 		addAnswerReveal(resp, game, hanzi)
 	}
 
 	jsonOK(w, resp)
 }
 
-// POST /api/game/{id}/guess
-func handleGuess(w http.ResponseWriter, r *http.Request) {
+// HandleGuess handles POST /api/game/{id}/guess.
+func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	if err != nil {
 		jsonErr(w, "invalid game id", http.StatusBadRequest)
@@ -213,7 +219,7 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	game, err := dbGetGame(uint(id))
+	game, err := store.GetGame(uint(id))
 	if err != nil {
 		jsonErr(w, "game not found", http.StatusNotFound)
 		return
@@ -223,57 +229,59 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	toneLang := lang.ToneSplitKind(game.Lang)
+
 	guess := strings.ToLower(strings.TrimSpace(req.Word))
-	if isJapaneseLang(game.Lang) {
-		guess = katakanaToHiragana(guess)
+	if lang.IsJapaneseLang(game.Lang) {
+		guess = lang.KatakanaToHiragana(guess)
 	}
-	guessChars := wordChars(guess)
+	guessChars := lang.WordChars(guess, toneLang)
 
 	if len(guessChars) != game.WordLength {
 		jsonErr(w, fmt.Sprintf("word must be %d characters", game.WordLength), http.StatusBadRequest)
 		return
 	}
 	for _, ch := range guess {
-		if ch != '*' && !isWordChar(ch) {
+		if ch != '*' && !lang.IsWordChar(ch) {
 			jsonErr(w, "word contains invalid characters", http.StatusBadRequest)
 			return
 		}
 	}
 
-	words, err := getCachedWordList(game.Lang, game.WordLength)
+	words, err := wordlist.GetCachedWordList(game.Lang, game.WordLength)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if _, ok := words[guess]; !ok {
-		normSet := getCachedNormalized(game.Lang, game.WordLength)
+		normSet := wordlist.GetCachedNormalized(game.Lang, game.WordLength)
 		var canonical string
 		if strings.Contains(guess, "*") {
-			canonical = matchWildcard(guessChars, normSet, getCachedOverflow(game.Lang, game.WordLength))
+			canonical = lang.MatchWildcard(guessChars, normSet, wordlist.GetCachedOverflow(game.Lang, game.WordLength), toneLang)
 		} else {
-			canonical = normSet[normalizeWord(guess)]
+			canonical = normSet[lang.NormalizeWord(guess, toneLang)]
 		}
 		if canonical != "" {
 			guess = canonical
-			guessChars = wordChars(guess)
+			guessChars = lang.WordChars(guess, toneLang)
 		} else {
 			jsonOK(w, map[string]any{"error": "Not in word list"})
 			return
 		}
 	}
 
-	answerChars := wordChars(game.Answer)
-	states := evaluate(guessChars, answerChars)
+	answerChars := lang.WordChars(game.Answer, toneLang)
+	states := lang.Evaluate(guessChars, answerChars)
 	statesJSON, _ := json.Marshal(states)
 	attempt := len(game.Guesses) + 1
 
-	rec := GuessRecord{
+	rec := store.GuessRecord{
 		GameID:  game.ID,
 		Attempt: attempt,
 		Word:    guess,
 		States:  string(statesJSON),
 	}
-	if err := dbCreateGuess(&rec); err != nil {
+	if err := store.CreateGuess(&rec); err != nil {
 		jsonErr(w, "failed to save guess", http.StatusInternalServerError)
 		return
 	}
@@ -293,12 +301,14 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 		newStatus = "lost"
 	}
 	if won || lost {
-		_ = dbUpdateGameStatus(game.ID, newStatus)
-		logger.Info("game over", "id", game.ID, "status", newStatus, "attempts", attempt)
+		if err := store.UpdateGameStatus(game.ID, newStatus); err != nil {
+			slog.Error("failed to update game status", "id", game.ID, "error", err)
+		}
+		slog.Info("game over", "id", game.ID, "status", newStatus, "attempts", attempt)
 	}
-	logger.Debug("guess", "id", game.ID, "attempt", attempt, "word", guess, "won", won)
+	slog.Debug("guess", "id", game.ID, "attempt", attempt, "word", guess, "won", won)
 
-	hanzi := getCachedHanzi(game.Lang, game.WordLength)
+	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
 	resp := map[string]any{
 		"attempt":      attempt,
 		"word":         guess,
@@ -316,12 +326,12 @@ func handleGuess(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, resp)
 }
 
-// GET /api/stats?lang=English&length=5
-func handleGetStats(w http.ResponseWriter, r *http.Request) {
-	lang := r.URL.Query().Get("lang")
+// HandleGetStats handles GET /api/stats?lang=English&length=5.
+func HandleGetStats(w http.ResponseWriter, r *http.Request) {
+	lng := r.URL.Query().Get("lang")
 	length, _ := strconv.Atoi(r.URL.Query().Get("length"))
 
-	games, err := dbGetCompletedGames(lang, length)
+	games, err := store.GetCompletedGames(lng, length)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -366,7 +376,7 @@ func handleGetStats(w http.ResponseWriter, r *http.Request) {
 			wonIDs = append(wonIDs, g.ID)
 		}
 	}
-	distribution, _ := dbGetGuessDistribution(wonIDs)
+	distribution, _ := store.GetGuessDistribution(wonIDs)
 
 	jsonOK(w, map[string]any{
 		"games_played":   total,
@@ -378,18 +388,18 @@ func handleGetStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/languages
-func handleGetLanguages(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, map[string]any{"languages": getCachedLanguages()})
+// HandleGetLanguages handles GET /api/languages.
+func HandleGetLanguages(w http.ResponseWriter, r *http.Request) {
+	jsonOK(w, map[string]any{"languages": wordlist.GetCachedLanguages()})
 }
 
-// GET /api/progress?lang=X&length=Y
-func handleGetProgress(w http.ResponseWriter, r *http.Request) {
-	lang := r.URL.Query().Get("lang")
+// HandleGetProgress handles GET /api/progress?lang=X&length=Y.
+func HandleGetProgress(w http.ResponseWriter, r *http.Request) {
+	lng := r.URL.Query().Get("lang")
 	length, _ := strconv.Atoi(r.URL.Query().Get("length"))
-	key := fmt.Sprintf("%s:%d", lang, length)
+	key := fmt.Sprintf("%s:%d", lng, length)
 	count := 0
-	if v, ok := downloadProgress.Load(key); ok {
+	if v, ok := wordlist.DownloadProgress.Load(key); ok {
 		count = v.(int)
 	}
 	jsonOK(w, map[string]any{"count": count})

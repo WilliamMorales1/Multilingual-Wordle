@@ -1,4 +1,6 @@
-package main
+// Package wordlist fetches, caches, and serves per-language word lists
+// sourced from kaikki.org wiktextract dumps.
+package wordlist
 
 import (
 	"bufio"
@@ -15,13 +17,24 @@ import (
 	"sync"
 
 	"golang.org/x/net/html"
+
+	"wordgo/internal/lang"
 )
 
 const (
 	DefaultLang    = "English"
-	DefaultLength  = 5
+	DefaultLength  = 6
 	DefaultGuesses = 6
 )
+
+// dataPath resolves name relative to DATA_DIR (or the working directory if unset).
+func dataPath(name string) string {
+	dir := os.Getenv("DATA_DIR")
+	if dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, name)
+}
 
 type KaikkiEntry struct {
 	Word      string           `json:"word"`
@@ -76,11 +89,11 @@ var chineseDialects = []string{
 }
 
 // parseChineseDialect extracts the dialect name from a "Chinese (X)" pseudo-language.
-func parseChineseDialect(lang string) (string, bool) {
-	if !strings.HasPrefix(lang, "Chinese (") || !strings.HasSuffix(lang, ")") {
+func parseChineseDialect(lng string) (string, bool) {
+	if !strings.HasPrefix(lng, "Chinese (") || !strings.HasSuffix(lng, ")") {
 		return "", false
 	}
-	d := strings.TrimSuffix(strings.TrimPrefix(lang, "Chinese ("), ")")
+	d := strings.TrimSuffix(strings.TrimPrefix(lng, "Chinese ("), ")")
 	if d == "" {
 		return "", false
 	}
@@ -103,35 +116,28 @@ func romanizeEntry(entry KaikkiEntry, dialect string) string {
 	return ""
 }
 
-// filterLetters strips everything but letters and combining marks (digits,
-// spaces, hyphens, tone numbers) so a romanization can be used as a word.
-func filterLetters(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if isWordChar(r) {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // kaikkiURL builds the per-language dump URL on kaikki.org.
 // Directory uses %20 for spaces; filename has spaces stripped entirely.
-func kaikkiURL(lang string) string {
-	slug := strings.ReplaceAll(lang, " ", "")
+func kaikkiURL(lng string) string {
+	slug := strings.ReplaceAll(lng, " ", "")
 	u := &url.URL{
 		Scheme: "https",
 		Host:   "kaikki.org",
-		Path:   fmt.Sprintf("/dictionary/%s/kaikki.org-dictionary-%s.jsonl.gz", lang, slug),
+		Path:   fmt.Sprintf("/dictionary/%s/kaikki.org-dictionary-%s.jsonl.gz", lng, slug),
 	}
 	return u.String()
 }
 
-func cachePath(lang string, length int) string {
-	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
+// cacheFilePath returns a cache file path for lng/length, creating the cache dir if needed.
+func cacheFilePath(lng string, length int, suffix string) string {
+	safe := strings.ToLower(strings.ReplaceAll(lng, " ", "_"))
 	dir := dataPath("cache")
 	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, fmt.Sprintf("%s_%dl.json", safe, length))
+	return filepath.Join(dir, fmt.Sprintf("%s_%dl%s.json", safe, length, suffix))
+}
+
+func cachePath(lng string, length int) string {
+	return cacheFilePath(lng, length, "")
 }
 
 func firstGloss(entry KaikkiEntry) string {
@@ -147,7 +153,7 @@ func firstGloss(entry KaikkiEntry) string {
 
 // streamURL downloads and parses a gzipped JSONL word dump from kaikki.org.
 // Parsing is parallelised across CPU workers while the scanner streams the download.
-func streamURL(rawURL, lang, dialect string, length int, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
+func streamURL(rawURL, lng, dialect string, length int, toneLang string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, nil, nil, err
@@ -178,7 +184,7 @@ func streamURL(rawURL, lang, dialect string, length int, onProgress func(int)) (
 				if json.Unmarshal(line, &entry) != nil {
 					continue
 				}
-				if entry.Lang != lang || len(entry.Senses) == 0 || isExcludedEntry(entry) {
+				if entry.Lang != lng || len(entry.Senses) == 0 || isExcludedEntry(entry) {
 					continue
 				}
 				var word, hanzi string
@@ -187,23 +193,26 @@ func streamURL(rawURL, lang, dialect string, length int, onProgress func(int)) (
 					if rom == "" {
 						continue
 					}
-					word = filterLetters(strings.ToLower(rom))
+					word = lang.ChineseToneify(dialect, strings.ToLower(rom))
+					if word == "" {
+						continue
+					}
 					hanzi = entry.Word
 				} else {
 					word = strings.ToLower(entry.Word)
-					if isHangulLang(lang) {
-						word = expandJamo(decomposeHangul(word))
-						if !isPureJamo(word) {
+					if lang.IsHangulLang(lng) {
+						word = lang.ExpandJamo(lang.DecomposeHangul(word))
+						if !lang.IsPureJamo(word) {
 							continue
 						}
-					} else if isJapaneseLang(lang) {
-						word = katakanaToHiragana(word)
-						if !isPureHiragana(word) {
+					} else if lang.IsJapaneseLang(lng) {
+						word = lang.KatakanaToHiragana(word)
+						if !lang.IsPureHiragana(word) {
 							continue
 						}
 					}
 				}
-				if !isValid(word, length) {
+				if !lang.IsValid(word, length, toneLang) {
 					continue
 				}
 				results <- result{word, firstGloss(entry), hanzi, entry.Etymology}
@@ -264,30 +273,24 @@ func streamURL(rawURL, lang, dialect string, length int, onProgress func(int)) (
 }
 
 // hanziCachePath returns the sidecar cache path holding hanzi for a Chinese-dialect word list.
-func hanziCachePath(lang string, length int) string {
-	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
-	dir := dataPath("cache")
-	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, fmt.Sprintf("%s_%dl_hanzi.json", safe, length))
+func hanziCachePath(lng string, length int) string {
+	return cacheFilePath(lng, length, "_hanzi")
 }
 
 // etymologyCachePath returns the sidecar cache path holding etymology text for a word list.
-func etymologyCachePath(lang string, length int) string {
-	safe := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
-	dir := dataPath("cache")
-	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, fmt.Sprintf("%s_%dl_etymology.json", safe, length))
+func etymologyCachePath(lng string, length int) string {
+	return cacheFilePath(lng, length, "_etymology")
 }
 
-func loadWordList(lang string, length int) (map[string]string, map[string]string, map[string]string, error) {
-	cf := cachePath(lang, length)
-	hcf := hanziCachePath(lang, length)
-	ecf := etymologyCachePath(lang, length)
+func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, error) {
+	cf := cachePath(lng, length)
+	hcf := hanziCachePath(lng, length)
+	ecf := etymologyCachePath(lng, length)
 
 	if data, err := os.ReadFile(cf); err == nil {
 		var cached map[string]string
 		if err := json.Unmarshal(data, &cached); err == nil && len(cached) >= 20 {
-			log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lang, length, filepath.Base(cf))
+			log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lng, length, filepath.Base(cf))
 			var hanzi map[string]string
 			if hdata, err := os.ReadFile(hcf); err == nil {
 				json.Unmarshal(hdata, &hanzi)
@@ -300,9 +303,9 @@ func loadWordList(lang string, length int) (map[string]string, map[string]string
 		}
 	}
 
-	matchLang := lang
+	matchLang := lng
 	dialect := ""
-	if d, ok := parseChineseDialect(lang); ok {
+	if d, ok := parseChineseDialect(lng); ok {
 		matchLang = "Chinese"
 		dialect = d
 	}
@@ -310,22 +313,24 @@ func loadWordList(lang string, length int) (map[string]string, map[string]string
 	u := kaikkiURL(matchLang)
 	log.Printf("Downloading %s wiktextract dump from %s", matchLang, u)
 
-	key := fmt.Sprintf("%s:%d", lang, length)
-	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, func(n int) {
-		downloadProgress.Store(key, n)
+	toneLang := lang.ToneSplitKind(lng)
+
+	key := fmt.Sprintf("%s:%d", lng, length)
+	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, toneLang, func(n int) {
+		DownloadProgress.Store(key, n)
 	})
-	downloadProgress.Delete(key)
+	DownloadProgress.Delete(key)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lang)
+			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lng)
 		}
 		return nil, nil, nil, err
 	}
 	if len(words) == 0 {
-		return nil, nil, nil, fmt.Errorf("no %d-character %s words found", length, lang)
+		return nil, nil, nil, fmt.Errorf("no %d-character %s words found", length, lng)
 	}
 
-	log.Printf("%d %s %d-letter words collected", len(words), lang, length)
+	log.Printf("%d %s %d-letter words collected", len(words), lng, length)
 
 	if data, err := json.Marshal(words); err == nil {
 		if err := os.WriteFile(cf, data, 0644); err == nil {
@@ -334,12 +339,16 @@ func loadWordList(lang string, length int) (map[string]string, map[string]string
 	}
 	if hanzi != nil {
 		if data, err := json.Marshal(hanzi); err == nil {
-			os.WriteFile(hcf, data, 0644)
+			if err := os.WriteFile(hcf, data, 0644); err != nil {
+				log.Printf("Warning: failed to write hanzi cache %s: %v", hcf, err)
+			}
 		}
 	}
 	if len(etymology) > 0 {
 		if data, err := json.Marshal(etymology); err == nil {
-			os.WriteFile(ecf, data, 0644)
+			if err := os.WriteFile(ecf, data, 0644); err != nil {
+				log.Printf("Warning: failed to write etymology cache %s: %v", ecf, err)
+			}
 		}
 	}
 	return words, hanzi, etymology, nil

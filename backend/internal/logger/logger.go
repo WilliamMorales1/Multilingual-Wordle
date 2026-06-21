@@ -1,4 +1,4 @@
-package main
+package logger
 
 import (
 	"log/slog"
@@ -25,15 +25,13 @@ var (
 	}, []string{"method", "path"})
 )
 
-var logger *slog.Logger
-
-func initLogger() {
+// Init configures the process-wide slog default logger.
+func Init() {
 	level := slog.LevelInfo
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		level = slog.LevelDebug
 	}
-	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
 }
 
 type statusRecorder struct {
@@ -59,7 +57,8 @@ func metricsRoute(path string) string {
 	return path
 }
 
-func loggingMiddleware(next http.Handler) http.Handler {
+// Middleware logs each request and records Prometheus metrics for it.
+func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -68,7 +67,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		route := metricsRoute(r.URL.Path)
 		httpRequestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(rec.status)).Inc()
 		httpRequestDuration.WithLabelValues(r.Method, route).Observe(dur.Seconds())
-		logger.Info("request",
+		slog.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

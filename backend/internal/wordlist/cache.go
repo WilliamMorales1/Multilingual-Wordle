@@ -1,17 +1,21 @@
-package main
+package wordlist
 
 import (
 	"os"
 	"sort"
 	"sync"
+
+	"wordgo/internal/keyboard"
+	"wordgo/internal/lang"
 )
 
-type wlKey struct {
-	lang string
-	len  int
+// Key identifies a cached word list by language and word length.
+type Key struct {
+	Lang string
+	Len  int
 }
 
-type wlEntry struct {
+type entry struct {
 	words      map[string]string // word→def
 	hanzi      map[string]string // romanized word→hanzi (Chinese dialects only)
 	etymology  map[string]string // word→etymology text
@@ -21,19 +25,19 @@ type wlEntry struct {
 
 type wordListStore struct {
 	mu      sync.RWMutex
-	entries map[wlKey]*wlEntry
+	entries map[Key]*entry
 	loadMu  sync.Mutex
 }
 
 var wlCache = &wordListStore{
-	entries: make(map[wlKey]*wlEntry),
+	entries: make(map[Key]*entry),
 }
 
-// downloadProgress tracks in-flight word downloads: "lang:len" → count.
-var downloadProgress sync.Map
+// DownloadProgress tracks in-flight word downloads: "lang:len" → count.
+var DownloadProgress sync.Map
 
-func getCachedWordList(lang string, length int) (map[string]string, error) {
-	key := wlKey{lang, length}
+func GetCachedWordList(lng string, length int) (map[string]string, error) {
+	key := Key{lng, length}
 
 	wlCache.mu.RLock()
 	if e, ok := wlCache.entries[key]; ok {
@@ -53,21 +57,22 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 	}
 	wlCache.mu.RUnlock()
 
-	words, hanzi, etymology, err := loadWordList(lang, length)
+	words, hanzi, etymology, err := loadWordList(lng, length)
 	if err != nil {
 		return nil, err
 	}
 
-	normalized := buildNormalizedSet(words)
-	alphabet := buildAlphabet(words)
-	_, overflowBases, _ := buildKeyboardData(alphabet, lang, words)
+	toneLang := lang.ToneSplitKind(lng)
+	normalized := lang.BuildNormalizedSet(words, toneLang)
+	alphabet := lang.BuildAlphabet(words, toneLang)
+	_, overflowBases, _ := keyboard.BuildKeyboardData(alphabet, lng, words)
 	overflowSet := make(map[string]bool, len(overflowBases))
 	for _, b := range overflowBases {
 		overflowSet[b] = true
 	}
 
 	wlCache.mu.Lock()
-	wlCache.entries[key] = &wlEntry{
+	wlCache.entries[key] = &entry{
 		words:      words,
 		hanzi:      hanzi,
 		etymology:  etymology,
@@ -79,50 +84,50 @@ func getCachedWordList(lang string, length int) (map[string]string, error) {
 	return words, nil
 }
 
-// getCachedHanzi returns the romanized-word→hanzi map for a Chinese-dialect
+// GetCachedHanzi returns the romanized-word→hanzi map for a Chinese-dialect
 // word list, or nil if the language isn't a Chinese dialect or isn't cached yet.
-func getCachedHanzi(lang string, length int) map[string]string {
+func GetCachedHanzi(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
-	if e, ok := wlCache.entries[wlKey{lang, length}]; ok {
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
 		return e.hanzi
 	}
 	return nil
 }
 
-// getCachedEtymology returns the word→etymology map for a word list, or nil if not cached yet.
-func getCachedEtymology(lang string, length int) map[string]string {
+// GetCachedEtymology returns the word→etymology map for a word list, or nil if not cached yet.
+func GetCachedEtymology(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
-	if e, ok := wlCache.entries[wlKey{lang, length}]; ok {
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
 		return e.etymology
 	}
 	return nil
 }
 
-// getWordListIfCached returns the cached word list without triggering a load.
-func getWordListIfCached(lang string, length int) map[string]string {
+// GetWordListIfCached returns the cached word list without triggering a load.
+func GetWordListIfCached(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
-	if e, ok := wlCache.entries[wlKey{lang, length}]; ok {
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
 		return e.words
 	}
 	return nil
 }
 
-func getCachedNormalized(lang string, length int) map[string]string {
+func GetCachedNormalized(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
-	if e, ok := wlCache.entries[wlKey{lang, length}]; ok {
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
 		return e.normalized
 	}
 	return nil
 }
 
-func getCachedOverflow(lang string, length int) map[string]bool {
+func GetCachedOverflow(lng string, length int) map[string]bool {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
-	if e, ok := wlCache.entries[wlKey{lang, length}]; ok {
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
 		return e.overflow
 	}
 	return nil
@@ -133,13 +138,14 @@ var (
 	langCache   []string
 )
 
-// dir. If keep is non-zero, that entry's in-memory data is preserved so an
-// in-progress game using it keeps working; its on-disk cache file is still
-// removed since it isn't needed again until the process restarts.
-func clearWordListCache(keep wlKey) error {
+// ClearWordListCache wipes the in-memory and on-disk word list cache. If keep
+// is non-zero, that entry's in-memory data is preserved so an in-progress
+// game using it keeps working; its on-disk cache file is still removed since
+// it isn't needed again until the process restarts.
+func ClearWordListCache(keep Key) error {
 	wlCache.mu.Lock()
-	newEntries := make(map[wlKey]*wlEntry)
-	if keep != (wlKey{}) {
+	newEntries := make(map[Key]*entry)
+	if keep != (Key{}) {
 		if e, ok := wlCache.entries[keep]; ok {
 			newEntries[keep] = e
 		}
@@ -154,7 +160,7 @@ func clearWordListCache(keep wlKey) error {
 	return os.RemoveAll(dataPath("cache"))
 }
 
-func getCachedLanguages() []string {
+func GetCachedLanguages() []string {
 	langCacheMu.RLock()
 	if langCache != nil {
 		defer langCacheMu.RUnlock()
@@ -171,6 +177,12 @@ func getCachedLanguages() []string {
 
 	langMap := getLanguages()
 	names := make([]string, 0, len(langMap)+len(chineseDialects))
+	for name := range langMap {
+		names = append(names, name)
+	}
+	for _, d := range chineseDialects {
+		names = append(names, "Chinese ("+d+")")
+	}
 
 	sort.Strings(names)
 	langCache = names

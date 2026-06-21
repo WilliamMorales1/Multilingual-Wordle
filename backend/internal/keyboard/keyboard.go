@@ -1,8 +1,14 @@
-package main
+// Package keyboard derives on-screen keyboard layout, overflow, and
+// equivalence-grouping data from a language's alphabet.
+package keyboard
 
-import "sort"
+import (
+	"slices"
+	"sort"
+	"strings"
 
-const logographicThreshold = 200
+	"wordgo/internal/lang"
+)
 
 var keyboardLayouts = map[string][][]string{
 	"qwerty": {
@@ -143,6 +149,66 @@ var keyboardLayouts = map[string][][]string{
 		{"𐒼", "𐒽", "𐒾", "𐒿", "𐓀", "𐓁", "𐓂", "𐓃", "𐓄", "𐓅", "𐓆", "𐓇"},
 		{"𐓈", "𐓉", "𐓊", "𐓋", "𐓌", "𐓍", "𐓎", "𐓏", "𐓐", "𐓑", "𐓒", "𐓓"},
 	},
+	// Vietnamese: qwerty's row shape (10/9/7) with each base letter's variants
+	// (ă/â, đ, ê, ô/ơ, ư) inserted right after it, and qwerty letters Vietnamese
+	// doesn't use (f, j, w, z) dropped. Tone marks split off as their
+	// own tile by lang.WordChars, translated to non-combining glyphs (see
+	// toneTranslationsByKind) so they render as real keys instead of bare
+	// combining marks with nothing to attach to.
+	"vietnamese": {
+		{"q", "ư", "e", "ê", "r", "ˀ", "t", "y", "u", "i", "o", "ô", "ơ", "p"},
+		{"a", "ă", "â", "s", "´", "d", "đ", "`", "g", "h", ".", "k", "l"},
+		{"x", "~", "c", "v", "b", "n", "m"},
+	},
+	// Chinese: exact qwerty row shape — pinyin uses every qwerty letter except
+	// v, whose slot is taken by ü. Every dialect's tone is folded by
+	// lang.ChineseToneify into one of the four traditional Middle Chinese tone
+	// categories (see https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese))
+	// and appended as its own literal hanzi tile, so the same four tone keys
+	// cover every dialect's romanization.
+	"chinese": {
+		{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
+		{"a", "s", "d", "f", "g", "h", "j", "k", "l"},
+		{"z", "x", "c", "ü", "b", "n", "m"},
+		{lang.TonePing, lang.ToneShang, lang.ToneQu, lang.ToneRu}, // 平 上 去 入
+	},
+}
+
+func isSyllabary(keyboardLayout string) bool {
+	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "chinese"}
+	if slices.Contains(marked, keyboardLayout) {
+		return true
+	}
+	return false
+}
+
+// resolveLayoutOverride returns the explicit preset layout for a language,
+// bypassing char-sampling detectLayout. Covers langLayoutMap plus Vietnamese
+// and all "Chinese (Dialect)" pseudo-languages, whose pinyin romanization
+// needs the tone-mark keys laid out in the "chinese" preset above.
+func resolveLayoutOverride(lng string) string {
+	if name, ok := langLayoutMap[lng]; ok {
+		return name
+	}
+	if strings.EqualFold(lng, "Vietnamese") {
+		return "vietnamese"
+	}
+	if strings.EqualFold(lng, "Chinese") || strings.HasPrefix(lng, "Chinese (") {
+		return "chinese"
+	}
+	return ""
+}
+
+// DefaultLengthForLang picks the default word length for a language before
+// its word list is even fetched: 3 for syllabary-style layouts (where each
+// "letter" carries more information, e.g. tone marks now occupy their own
+// tile), 6 otherwise.
+func DefaultLengthForLang(lng string) int {
+	name := resolveLayoutOverride(lng)
+	if name != "" && isSyllabary(name) {
+		return 3
+	}
+	return 6
 }
 
 // langLayoutMap overrides script-detection for languages whose alphabet is a pure
@@ -209,12 +275,12 @@ func detectLayout(words map[string]string) string {
 	return best
 }
 
-// buildKeyboardData returns keyboard rows (base chars) and overflow bases
+// BuildKeyboardData returns keyboard rows (base chars) and overflow bases
 // (alphabet bases not present in any layout key).
-func buildKeyboardData(alphabet []string, lang string, words map[string]string) (rows [][]string, overflowBases []string, placedExact map[string]bool) {
+func BuildKeyboardData(alphabet []string, lng string, words map[string]string) (rows [][]string, overflowBases []string, placedExact map[string]bool) {
 	// If no alphabet (logographic threshold exceeded) but a preset exists, return it as-is.
 	if len(alphabet) == 0 {
-		name := langLayoutMap[lang]
+		name := resolveLayoutOverride(lng)
 		if name == "" {
 			name = detectLayout(words)
 		}
@@ -229,7 +295,7 @@ func buildKeyboardData(alphabet []string, lang string, words map[string]string) 
 		alphabetSet[ch] = true
 	}
 
-	layoutName := langLayoutMap[lang]
+	layoutName := resolveLayoutOverride(lng)
 	if layoutName == "" {
 		layoutName = detectLayout(words)
 	}
@@ -239,7 +305,7 @@ func buildKeyboardData(alphabet []string, lang string, words map[string]string) 
 	}
 
 	// Place exact literal matches first so preset keys with diacritics (e.g. "й")
-	// aren't dropped just because normalizeChar would strip them to a different letter.
+	// aren't dropped just because NormalizeChar would strip them to a different letter.
 	placedExact = make(map[string]bool)
 	for _, layoutRow := range layout {
 		var row []string
@@ -257,7 +323,7 @@ func buildKeyboardData(alphabet []string, lang string, words map[string]string) 
 	// Bases already covered by a placed key (e.g. "e" covers é if "e" but not "é" is placed).
 	coveredBases := make(map[string]bool, len(placedExact))
 	for key := range placedExact {
-		coveredBases[normalizeChar(key)] = true
+		coveredBases[lang.NormalizeChar(key)] = true
 	}
 
 	overflowSet := make(map[string]bool)
@@ -265,7 +331,7 @@ func buildKeyboardData(alphabet []string, lang string, words map[string]string) 
 		if placedExact[ch] {
 			continue
 		}
-		base := normalizeChar(ch)
+		base := lang.NormalizeChar(ch)
 		if coveredBases[base] {
 			continue
 		}
@@ -282,10 +348,10 @@ func buildKeyboardData(alphabet []string, lang string, words map[string]string) 
 	return rows, overflowBases, placedExact
 }
 
-// computeEquivalences groups alphabet chars by their base form.
+// ComputeEquivalences groups alphabet chars by their base form.
 // Returns only groups with >1 member or the "*" overflow group.
 // Each group is [base/label, variant1, variant2, ...].
-func computeEquivalences(alphabet []string, overflowBaseSet map[string]bool, placedExact map[string]bool) [][]string {
+func ComputeEquivalences(alphabet []string, overflowBaseSet map[string]bool, placedExact map[string]bool) [][]string {
 	if len(alphabet) == 0 {
 		return nil
 	}
@@ -295,7 +361,7 @@ func computeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 	for _, ch := range alphabet {
 		base := ch
 		if !placedExact[ch] {
-			base = normalizeChar(ch)
+			base = lang.NormalizeChar(ch)
 			if overflowBaseSet[base] {
 				base = "*"
 			}
@@ -342,17 +408,17 @@ func computeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 	return result
 }
 
-// buildGameExtras computes all derived UI data from the alphabet in one call.
-func buildGameExtras(alphabet []string, lang string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool) {
+// BuildGameExtras computes all derived UI data from the alphabet in one call.
+func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool) {
 	var placedExact map[string]bool
-	keyboardRows, overflowBases, placedExact = buildKeyboardData(alphabet, lang, words)
+	keyboardRows, overflowBases, placedExact = BuildKeyboardData(alphabet, lng, words)
 	overflowSet := make(map[string]bool, len(overflowBases))
 	for _, b := range overflowBases {
 		overflowSet[b] = true
 	}
-	equivalences = computeEquivalences(alphabet, overflowSet, placedExact)
+	equivalences = ComputeEquivalences(alphabet, overflowSet, placedExact)
 
-	layoutName := langLayoutMap[lang]
+	layoutName := resolveLayoutOverride(lng)
 	if layoutName == "" {
 		layoutName = detectLayout(words)
 	}

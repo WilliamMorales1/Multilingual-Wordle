@@ -85,6 +85,7 @@ export async function onEnter(): Promise<void> {
   }
 
   setRowCaption(rowIdx, result.chars);
+  S.history.push(states);
 
   revealRow(rowIdx, chars, states, () => {
     refreshKeyboard();
@@ -109,12 +110,12 @@ export async function onEnter(): Promise<void> {
 
 export async function startGame(): Promise<void> {
   const lang       = (document.getElementById('langInput') as HTMLInputElement).value.trim() || 'English';
-  const length     = parseInt((document.getElementById('lengthInput') as HTMLInputElement).value) || 5;
+  const length     = parseInt((document.getElementById('lengthInput') as HTMLInputElement).value) || 6;
   const maxGuesses = parseInt((document.getElementById('guessesInput') as HTMLInputElement).value) || 6;
 
   closeModal('settingsModal');
 
-  Object.assign(S, { lang, wordLength: length, maxGuesses, status: 'loading', currentRow: 0, input: [], charStates: {}, gameId: null });
+  Object.assign(S, { lang, wordLength: length, maxGuesses, status: 'loading', currentRow: 0, input: [], charStates: {}, gameId: null, history: [] });
 
   document.getElementById('loading')!.style.display  = 'flex';
   document.getElementById('board')!.style.display    = 'none';

@@ -32,7 +32,8 @@ export function buildKeyboard(rows: string[][] | null, overflowBases: Set<string
     rowEl.className = 'key-row';
 
     for (const char of rowChars) {
-      const btn = makeKey(char.toUpperCase(), '', () => onKey(char));
+      const label = /^\p{M}$/u.test(char) ? '◌' + char : char.toUpperCase();
+      const btn = makeKey(label, '', () => onKey(char));
       btn.dataset['char'] = char;
       rowEl.appendChild(btn);
     }

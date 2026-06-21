@@ -2,3 +2,5 @@ backend/cache/
 TODO.md
 backend/wordgo.db
 backend/wordgo.exe
+backend/wordgo
+frontend/public/script.js

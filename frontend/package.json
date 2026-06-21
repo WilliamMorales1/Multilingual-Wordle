@@ -2,9 +2,9 @@
   "name": "multilingual-wordle",
   "private": true,
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --outfile=script.js",
+    "build": "esbuild src/main.ts --bundle --outfile=public/script.js",
     "typecheck": "tsc --noEmit",
-    "watch": "esbuild src/main.ts --bundle --outfile=script.js --watch"
+    "watch": "esbuild src/main.ts --bundle --outfile=public/script.js --watch"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

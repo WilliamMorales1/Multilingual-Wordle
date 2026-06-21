@@ -74,4 +74,5 @@ export interface AppState {
   charStates: Record<string, string>;
   lastAttempt: number;
   rtl: boolean;
+  history: string[][];
 }

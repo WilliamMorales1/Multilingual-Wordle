@@ -36,6 +36,30 @@ export function showEquivNotice(equivalences: string[][]): void {
   notice.hidden = false;
 }
 
+const STATE_EMOJI: Record<string, string> = { correct: '🟩', present: '🟨', absent: '⬛' };
+
+function buildShareText(): string {
+  const n     = S.status === 'won' ? String(S.history.length) : 'X';
+  const grid  = S.history.map(row => row.map(st => STATE_EMOJI[st] ?? '⬛').join('')).join('\n');
+  return `Wordgo — ${S.lang} (${S.wordLength}) ${n}/${S.maxGuesses}\n\n${grid}`;
+}
+
+export async function shareResult(): Promise<void> {
+  const text = buildShareText();
+  try {
+    if (navigator.share) {
+      await navigator.share({ text });
+      return;
+    }
+  } catch (_) { return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied results to clipboard');
+  } catch (_) {
+    toast('Could not copy results');
+  }
+}
+
 export async function showStats(lastResult: Partial<GuessResult> | null): Promise<void> {
   clearToast();
 
@@ -88,6 +112,9 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
   } else {
     defEl.style.display = 'none';
   }
+
+  const shareBtn = document.getElementById('shareBtn')!;
+  shareBtn.hidden = !(S.status === 'won' || S.status === 'lost') || S.history.length === 0;
 
   openModal('statsModal');
 }

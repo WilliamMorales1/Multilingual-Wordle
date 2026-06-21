@@ -1,4 +1,4 @@
-package main
+package store
 
 type Game struct {
 	ID         uint          `json:"id"`

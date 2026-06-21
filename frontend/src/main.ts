@@ -2,10 +2,10 @@ import { S } from './state.js';
 import { api } from './api.js';
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js');
+  navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW registration failed:', err));
 }
 import { startGame, onEnter, onBackspace, onKeyPress } from './game.js';
-import { openModal, closeModal, showStats, toast } from './ui.js';
+import { openModal, closeModal, showStats, toast, shareResult } from './ui.js';
 
 document.addEventListener('keydown', (e: KeyboardEvent) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -21,6 +21,7 @@ document.getElementById('startBtn')!.addEventListener('click', startGame);
 document.getElementById('settingsBtn')!.addEventListener('click', () => openModal('settingsModal'));
 document.getElementById('statsBtn')!.addEventListener('click', () => showStats(null));
 document.getElementById('closeStats')!.addEventListener('click', () => closeModal('statsModal'));
+document.getElementById('shareBtn')!.addEventListener('click', shareResult);
 document.getElementById('newGameFromStats')!.addEventListener('click', () => {
   closeModal('statsModal');
   openModal('settingsModal');
@@ -56,7 +57,7 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
 
   try {
     const data = await api.languages();
-    allLangs = data.languages ?? [];
+    allLangs = (data.languages ?? []).filter(l => l !== 'Chinese');
   } catch (_) {}
 
   function render(filter: string): void {
@@ -79,7 +80,7 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     options!.hidden = true;
     activeIdx = -1;
     const lengthInput = document.getElementById('lengthInput') as HTMLInputElement | null;
-    if (lengthInput) lengthInput.value = '5';
+    if (lengthInput) lengthInput.value = '6';
   }
 
   function setActive(idx: number): void {
