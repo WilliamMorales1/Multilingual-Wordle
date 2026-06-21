@@ -111,18 +111,9 @@ func IsPureJamo(word string) bool {
 	return len(word) > 0
 }
 
-// toneTranslationsByKind maps the combining tone marks of a tone-split
-// language to a non-combining (spacing) glyph used as that tone's tile —
-// in source text, on the keyboard, and in the stored answer alike, so a
-// lone tone tile always renders as a real visible glyph instead of a
-// combining mark with nothing to attach to. Vietnamese tone marks ride
-// alongside vowel-quality diacritics (â, ơ, ư, ...) which must stay attached
-// to their base letter, so only the five actual tone marks split off.
-//
-// Chinese isn't handled here: its tone is folded into a literal trailing
-// hanzi tile (see ChineseToneify) at word-list ingestion time, since the
-// four traditional tone categories need digit/diacritic *and* checked-coda
-// inspection per dialect that doesn't fit the generic combining-mark model.
+// toneTranslationsByKind maps a tone-split language's combining tone marks to a
+// non-combining (spacing) glyph for that tone's tile. Vietnamese's vowel-quality
+// diacritics stay attached; only tone marks split off. Chinese: see ChineseToneify.
 var toneTranslationsByKind = map[string]map[rune]string{
 	"vietnamese": {
 		0x0300: "`",  // huyền (grave)        -> GRAVE ACCENT
@@ -142,10 +133,9 @@ func ToneSplitKind(lng string) string {
 	return ""
 }
 
-// wordCharsToneSplit splits a word into grapheme clusters like WordChars, but
-// pulls each tone mark out into its own tile (translated to its non-combining
-// glyph via toneTranslationsByKind) instead of merging it into the preceding
-// base letter.
+// wordCharsToneSplit splits a word like WordChars, but pulls each tone mark
+// into its own tile (translated via toneTranslationsByKind) instead of
+// merging it into the preceding base letter.
 func wordCharsToneSplit(word, kind string) []string {
 	toneMarks := toneTranslationsByKind[kind]
 	var chars []string
@@ -192,11 +182,24 @@ func WordChars(word, toneLang string) []string {
 		var char strings.Builder
 		char.WriteString(string(runes[i]))
 		i++
+		// Abugida vowel-sign (matra) marks split off into their own tile
+		// instead of merging into the consonant's tile, since they're a
+		// keyboard-visible vowel choice, not a mere accent.
 		for i < len(runes) && unicode.In(runes[i], unicode.Mn, unicode.Mc, unicode.Me) {
+			if _, isMatra := matraToVowel[runes[i]]; isMatra {
+				break
+			}
 			char.WriteString(string(runes[i]))
 			i++
 		}
 		chars = append(chars, char.String())
+		for i < len(runes) {
+			if _, isMatra := matraToVowel[runes[i]]; !isMatra {
+				break
+			}
+			chars = append(chars, string(runes[i]))
+			i++
+		}
 	}
 	return chars
 }
@@ -252,44 +255,82 @@ func normalizeKanaRune(r rune) rune {
 	return r
 }
 
-// normalizeSyllabicsRune maps Canadian Aboriginal Syllabics consonant+vowel
-// glyphs to the canonical "a"-vowel form of the same consonant, so the
-// keyboard shows one key per consonant regardless of vowel.
-func normalizeSyllabicsRune(r rune) rune {
-	switch r {
-	case 'ᐱ', 'ᐯ', 'ᐳ':
-		return 'ᐸ'
-	case 'ᑎ', 'ᑐ':
-		return 'ᑕ'
-	case 'ᑭ', 'ᑯ':
-		return 'ᑲ'
-	case 'ᒋ', 'ᒍ':
-		return 'ᒐ'
-	case 'ᒥ', 'ᒧ':
-		return 'ᒪ'
-	case 'ᓂ', 'ᓄ':
-		return 'ᓇ'
-	case 'ᓭ', 'ᓯ', 'ᓱ':
-		return 'ᓴ'
-	case 'ᔨ', 'ᔪ':
-		return 'ᔭ'
-	case 'ᕆ', 'ᕈ':
-		return 'ᕒ'
-	case 'ᓕ', 'ᓗ':
-		return 'ᓚ'
-	}
-	return r
+// abugidaVowelMatras maps each Brahmic script's independent vowels to their
+// dependent matra form, used to split consonant+matra into two tiles
+// (WordChars) and map a lone matra back to its vowel (NormalizeChar).
+var abugidaVowelMatras = map[string]map[rune]rune{
+	"devanagari": {
+		'आ': 0x093E, 'इ': 0x093F, 'ई': 0x0940, 'उ': 0x0941, 'ऊ': 0x0942,
+		'ऋ': 0x0943, 'ए': 0x0947, 'ऐ': 0x0948, 'ऑ': 0x0949, 'ओ': 0x094B, 'औ': 0x094C,
+	},
+	"gujarati": {
+		'આ': 0x0ABE, 'ઇ': 0x0ABF, 'ઈ': 0x0AC0, 'ઉ': 0x0AC1, 'ઊ': 0x0AC2,
+		'ઋ': 0x0AC3, 'એ': 0x0AC7, 'ઐ': 0x0AC8, 'ઑ': 0x0AC9, 'ઓ': 0x0ACB, 'ઔ': 0x0ACC,
+	},
+	"bengali": {
+		'আ': 0x09BE, 'ই': 0x09BF, 'ঈ': 0x09C0, 'উ': 0x09C1, 'ঊ': 0x09C2,
+		'ঋ': 0x09C3, 'এ': 0x09C7, 'ঐ': 0x09C8, 'ও': 0x09CB, 'ঔ': 0x09CC,
+	},
+	"gurmukhi": {
+		'ਆ': 0x0A3E, 'ਇ': 0x0A3F, 'ਈ': 0x0A40, 'ਉ': 0x0A41, 'ਊ': 0x0A42,
+		'ਏ': 0x0A47, 'ਐ': 0x0A48, 'ਓ': 0x0A4B, 'ਔ': 0x0A4C,
+	},
+	"tamil": {
+		'ஆ': 0x0BBE, 'இ': 0x0BBF, 'ஈ': 0x0BC0, 'உ': 0x0BC1, 'ஊ': 0x0BC2,
+		'எ': 0x0BC6, 'ஏ': 0x0BC7, 'ஐ': 0x0BC8, 'ஒ': 0x0BCA, 'ஓ': 0x0BCB, 'ஔ': 0x0BCC,
+	},
+	"telugu": {
+		'ఆ': 0x0C3E, 'ఇ': 0x0C3F, 'ఈ': 0x0C40, 'ఉ': 0x0C41, 'ఊ': 0x0C42,
+		'ఋ': 0x0C43, 'ఎ': 0x0C46, 'ఏ': 0x0C47, 'ఐ': 0x0C48, 'ఒ': 0x0C4A, 'ఓ': 0x0C4B, 'ఔ': 0x0C4C,
+	},
+	"kannada": {
+		'ಆ': 0x0CBE, 'ಇ': 0x0CBF, 'ಈ': 0x0CC0, 'ಉ': 0x0CC1, 'ಊ': 0x0CC2,
+		'ಋ': 0x0CC3, 'ಎ': 0x0CC6, 'ಏ': 0x0CC7, 'ಐ': 0x0CC8, 'ಒ': 0x0CCA, 'ಓ': 0x0CCB, 'ಔ': 0x0CCC,
+	},
 }
 
-// NormalizeChar strips diacritical marks and lowercases a grapheme cluster.
-// Enables accent-insensitive comparison: é→e, ñ→n, ü→u.
-// For kana: small variants collapse to large (っ→つ), and dakuten/handakuten
-// are stripped via NFD so voiced forms match their base (が→か, ぱ→は).
-// For syllabics: vowel variants of the same consonant collapse to the "a" form.
+// matraToVowel is the flattened reverse index (matra rune -> independent
+// vowel rune) used by WordChars (to spot a matra worth splitting off) and
+// NormalizeChar (to map a lone matra tile back to its base vowel key).
+var matraToVowel = func() map[rune]rune {
+	m := make(map[rune]rune)
+	for _, table := range abugidaVowelMatras {
+		for vowel, matra := range table {
+			m[matra] = vowel
+		}
+	}
+	return m
+}()
+
+// MatraTable returns the independent-vowel -> matra map for an abugida
+// keyboard layout name (e.g. "devanagari"), or nil if not one. Exposed so
+// the frontend can swap a vowel key to its combining form after a consonant.
+func MatraTable(layoutName string) map[string]string {
+	table, ok := abugidaVowelMatras[layoutName]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(table))
+	for vowel, matra := range table {
+		out[string(vowel)] = string(matra)
+	}
+	return out
+}
+
+// NormalizeChar strips diacritical marks and lowercases a grapheme cluster
+// for accent-insensitive comparison (é→e, ñ→n). For kana, small variants
+// collapse to large and dakuten/handakuten strip via NFD (が→か, ぱ→は).
 func NormalizeChar(ch string) string {
+	// A lone matra tile normalizes to its independent vowel letter, so it
+	// groups with — and is covered by — that vowel's keyboard key.
+	if runes := []rune(ch); len(runes) == 1 {
+		if vowel, ok := matraToVowel[runes[0]]; ok {
+			return string(vowel)
+		}
+	}
 	var pre strings.Builder
 	for _, r := range ch {
-		pre.WriteRune(normalizeSyllabicsRune(normalizeKanaRune(r)))
+		pre.WriteRune(normalizeKanaRune(r))
 	}
 	nfd := norm.NFD.String(pre.String())
 	var buf strings.Builder
@@ -408,9 +449,8 @@ func Evaluate(guessChars, answerChars []string) []string {
 }
 
 // The four traditional Middle Chinese tone categories — see
-// https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese). Every Chinese
-// dialect's romanized words get one of these folded into the word as its own
-// trailing tile per syllable, instead of the dialect's native tone notation.
+// https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese). Each dialect's
+// romanized syllable gets one folded in as its own trailing tile.
 const (
 	TonePing  = "平" // level
 	ToneShang = "上" // rising
@@ -418,11 +458,9 @@ const (
 	ToneRu    = "入" // entering (checked, historically ended in -p/-t/-k)
 )
 
-// mandarinToneMarks maps the NFD combining marks Wiktionary's Mandarin pinyin
-// uses (macron/acute/caron/grave) to a tone category. Pinyin tones 1 (yīn
-// píng) and 2 (yáng píng) are both reflexes of Middle Chinese 平; tone 3 is
-// 上; tone 4 covers both the old 去 syllables and the (lost in Mandarin)
-// 入 syllables that merged into it, so it's labeled 去.
+// mandarinToneMarks maps Wiktionary pinyin's NFD combining marks (macron/
+// acute/caron/grave) to a tone category. Pinyin tones 1/2 are both 平;
+// tone 3 is 上; tone 4 covers 去 plus the (Mandarin-merged) 入 syllables.
 var mandarinToneMarks = map[rune]string{
 	0x0304: TonePing,
 	0x0301: TonePing,
@@ -430,15 +468,9 @@ var mandarinToneMarks = map[rune]string{
 	0x0300: ToneQu,
 }
 
-// chineseDialectToneDigits maps each dialect's modern tone-number scheme to a
-// tone category for *non-checked* syllables. This is an approximation: true
-// Middle Chinese tone class depends on the syllable's original initial
-// voicing (e.g. 浊上归去 — voiced-initial 上 syllables became 去ed in
-// Mandarin), which modern romanizations don't carry, and entering-tone
-// syllables are detected structurally instead (see isCheckedCoda) since most
-// of these dialects reuse non-entering tone numbers for entering syllables.
-// Numbering follows each dialect's conventional yin/yang-ping/shang/qu(/ru)
-// ordering.
+// chineseDialectToneDigits maps each dialect's tone-number scheme to a tone
+// category for *non-checked* syllables — an approximation, since true Middle
+// Chinese class depends on initial voicing romanizations drop (see isCheckedCoda).
 var chineseDialectToneDigits = map[string]map[int]string{
 	"Mandarin":  {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu},
 	"Cantonese": {1: TonePing, 2: ToneShang, 3: ToneQu, 4: TonePing, 5: ToneShang, 6: ToneQu},
@@ -453,10 +485,9 @@ var chineseDialectToneDigits = map[string]map[int]string{
 	"Jin":       {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneRu},
 }
 
-// checkedCodaSuffixes are stop-consonant/glottal codas that mark a syllable
-// as historically checked (入), overriding the dialect's tone-digit lookup —
-// these dialects (unlike Mandarin) reuse some tone numbers across both
-// checked and unchecked syllables, distinguished structurally by the coda.
+// checkedCodaSuffixes are stop-consonant/glottal codas marking a syllable as
+// historically checked (入), overriding the tone-digit lookup — these dialects
+// reuse some tone numbers across checked/unchecked syllables, split by coda.
 var checkedCodaSuffixes = []string{"p", "t", "k", "h"}
 
 func isCheckedCoda(letters string) bool {
@@ -495,10 +526,9 @@ func splitTrailingDigits(s string) (string, int) {
 	return s[:end], n
 }
 
-// mandarinToneify folds Mandarin pinyin's diacritic tone marks into trailing
-// 平/上/去 tiles, character by character — Wiktionary's Mandarin pinyin
-// readings are often concatenated without syllable separators, so unlike
-// the other dialects this can't split on whitespace/hyphens first.
+// mandarinToneify folds pinyin's diacritic tone marks into trailing 平/上/去
+// tiles char by char — Wiktionary's readings are often concatenated without
+// syllable separators, so unlike other dialects this can't split on hyphens.
 func mandarinToneify(rom string) string {
 	normalized := norm.NFD.String(rom)
 	runes := []rune(normalized)
@@ -529,10 +559,9 @@ func mandarinToneify(rom string) string {
 	return out.String()
 }
 
-// ChineseToneify converts a Chinese dialect's raw romanization into a
-// guessable word where each syllable's tone is folded down into one of the
-// four traditional tone-category hanzi (TonePing/ToneShang/ToneQu/ToneRu),
-// appended as its own tile — see the four-tones doc comment above.
+// ChineseToneify converts a dialect's raw romanization into a guessable word
+// where each syllable's tone is folded into one of the four tone-category
+// hanzi (TonePing/ToneShang/ToneQu/ToneRu), appended as its own tile.
 func ChineseToneify(dialect, rom string) string {
 	if dialect == "Mandarin" {
 		return mandarinToneify(rom)

@@ -1,7 +1,7 @@
 import { S } from './state.js';
 import { api } from './api.js';
 import { buildBoard, updateCurrentRow, revealRow, bounceRow, shakeRow, setRowCaption } from './board.js';
-import { buildKeyboard, refreshKeyboard, stripDiacritics } from './keyboard.js';
+import { buildKeyboard, refreshKeyboard, refreshVowelKeys, stripDiacritics, markDisplay } from './keyboard.js';
 import { toast, openModal, closeModal, showEquivNotice, showStats } from './ui.js';
 
 let _progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -27,15 +27,30 @@ function stopProgressPolling(): void {
 export function onKeyPress(ch: string): void {
   if (S.status !== 'playing') return;
   if (S.input.length >= S.wordLength) return;
-  if (/^\p{M}+$/u.test(ch)) return; // ignore standalone combining marks (Indic matras etc.)
+
+  // Abugida vowel keys (devanagari, gujarati, etc.): typed right after a
+  // consonant, insert the combining matra instead of the independent vowel
+  // letter — it still lands as its own tile (see backend WordChars split).
+  const matra = S.matraMap[ch];
+  if (matra) {
+    const prev = S.input[S.input.length - 1];
+    const prevIsVowelOrMark = prev !== undefined &&
+      (prev in S.matraMap || Object.values(S.matraMap).includes(prev) || /^\p{M}+$/u.test(prev));
+    if (prev !== undefined && !prevIsVowelOrMark) ch = matra;
+  } else if (/^\p{M}+$/u.test(ch)) {
+    return; // ignore standalone combining marks with no preceding base
+  }
+
   S.input.push(ch);
   updateCurrentRow();
+  refreshVowelKeys(S.matraMap);
 }
 
 export function onBackspace(): void {
   if (S.status !== 'playing') return;
   S.input.pop();
   updateCurrentRow();
+  refreshVowelKeys(S.matraMap);
 }
 
 export async function onEnter(): Promise<void> {
@@ -81,7 +96,7 @@ export async function onEnter(): Promise<void> {
 
   for (let c = 0; c < S.wordLength; c++) {
     const t = document.getElementById(`tile-${rowIdx}-${c}`);
-    if (t) t.textContent = (chars[c] ?? '').toUpperCase();
+    if (t) t.textContent = markDisplay(chars[c] ?? '');
   }
 
   setRowCaption(rowIdx, result.chars);
@@ -92,6 +107,7 @@ export async function onEnter(): Promise<void> {
     S.currentRow++;
     S.input = [];
     S.status = 'playing';
+    refreshVowelKeys(S.matraMap);
 
     if (result.status === 'won') {
       S.status = 'won';
@@ -145,14 +161,16 @@ export async function startGame(): Promise<void> {
     return;
   }
 
-  S.gameId = result.id;
-  S.status = 'playing';
-  S.rtl    = result.rtl ?? false;
+  S.gameId   = result.id;
+  S.status   = 'playing';
+  S.rtl      = result.rtl ?? false;
+  S.matraMap = result.matra_map ?? {};
 
   document.getElementById('board')!.style.display    = '';
   document.getElementById('keyboard')!.style.display = '';
 
   buildBoard();
   buildKeyboard(result.keyboard_rows ?? null, new Set(result.overflow_bases ?? []), onKeyPress, onEnter, onBackspace);
+  refreshVowelKeys(S.matraMap);
   showEquivNotice(result.equivalences ?? []);
 }

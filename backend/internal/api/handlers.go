@@ -142,7 +142,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength, "max_guesses", game.MaxGuesses)
 
 	alphabet := lang.BuildAlphabet(words, lang.ToneSplitKind(req.Lang))
-	keyboardRows, overflowBases, equivalences, rtl := keyboard.BuildGameExtras(alphabet, req.Lang, words)
+	keyboardRows, overflowBases, equivalences, rtl, matraMap := keyboard.BuildGameExtras(alphabet, req.Lang, words)
 	jsonOK(w, map[string]any{
 		"id":             game.ID,
 		"lang":           game.Lang,
@@ -155,6 +155,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		"overflow_bases": overflowBases,
 		"equivalences":   equivalences,
 		"rtl":            rtl,
+		"matra_map":      matraMap,
 	})
 }
 
@@ -177,9 +178,10 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	var overflowBases []string
 	var equivalences [][]string
 	var rtl bool
+	var matraMap map[string]string
 	if words := wordlist.GetWordListIfCached(game.Lang, game.WordLength); words != nil {
 		alphabet = lang.BuildAlphabet(words, lang.ToneSplitKind(game.Lang))
-		keyboardRows, overflowBases, equivalences, rtl = keyboard.BuildGameExtras(alphabet, game.Lang, words)
+		keyboardRows, overflowBases, equivalences, rtl, matraMap = keyboard.BuildGameExtras(alphabet, game.Lang, words)
 	}
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
@@ -195,6 +197,7 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 		"overflow_bases": overflowBases,
 		"equivalences":   equivalences,
 		"rtl":            rtl,
+		"matra_map":      matraMap,
 	}
 	if game.Status != "playing" {
 		addAnswerReveal(resp, game, hanzi)

@@ -12,4 +12,5 @@ export const S: AppState = {
   lastAttempt: 0,
   rtl:         false,
   history:     [],
+  matraMap:    {},
 };

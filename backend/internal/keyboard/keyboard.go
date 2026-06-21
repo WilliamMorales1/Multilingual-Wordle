@@ -135,9 +135,19 @@ var keyboardLayouts = map[string][][]string{
 		{"Ᏸ", "Ᏹ", "Ᏺ", "Ᏻ", "Ᏼ"},
 	},
 	"syllabics": {
-		{"ᐊ", "ᐃ", "ᐅ"},
-		{"ᐸ", "ᑕ", "ᑲ", "ᒐ", "ᒪ", "ᓇ"},
-		{"ᓴ", "ᔭ", "ᕒ", "ᓚ"},
+		{"ᐁ", "ᐃ", "ᐅ", "ᐊ"},
+		{"ᐍ", "ᐏ", "ᐓ", "ᐘ"},
+		{"ᐯ", "ᐱ", "ᐳ", "ᐸ"},
+		{"ᑌ", "ᑎ", "ᑐ", "ᑕ"},
+		{"ᑫ", "ᑭ", "ᑯ", "ᑲ"},
+		{"ᒉ", "ᒋ", "ᒍ", "ᒐ"},
+		{"ᒣ", "ᒥ", "ᒧ", "ᒪ"},
+		{"ᓀ", "ᓂ", "ᓄ", "ᓇ"},
+		{"ᓭ", "ᓯ", "ᓱ", "ᓴ"},
+		{"ᔦ", "ᔨ", "ᔪ", "ᔭ"},
+		{"ᓓ", "ᓕ", "ᓗ", "ᓚ"},
+		{"ᕃ", "ᕆ", "ᕈ", "ᕒ"},
+		{"ᐤ", "ᐦ", "ᐨ", "ᐠ", "ᒼ", "ᐣ", "ᐢ", "ᐩ"},
 	},
 	"thaana": {
 		{"ޤ", "ވ", "އ", "ރ", "ތ", "ޔ", "ޕ"},
@@ -149,23 +159,14 @@ var keyboardLayouts = map[string][][]string{
 		{"𐒼", "𐒽", "𐒾", "𐒿", "𐓀", "𐓁", "𐓂", "𐓃", "𐓄", "𐓅", "𐓆", "𐓇"},
 		{"𐓈", "𐓉", "𐓊", "𐓋", "𐓌", "𐓍", "𐓎", "𐓏", "𐓐", "𐓑", "𐓒", "𐓓"},
 	},
-	// Vietnamese: qwerty's row shape (10/9/7) with each base letter's variants
-	// (ă/â, đ, ê, ô/ơ, ư) inserted right after it, and qwerty letters Vietnamese
-	// doesn't use (f, j, w, z) dropped. Tone marks split off as their
-	// own tile by lang.WordChars, translated to non-combining glyphs (see
-	// toneTranslationsByKind) so they render as real keys instead of bare
-	// combining marks with nothing to attach to.
 	"vietnamese": {
 		{"q", "ư", "e", "ê", "r", "ˀ", "t", "y", "u", "i", "o", "ô", "ơ", "p"},
 		{"a", "ă", "â", "s", "´", "d", "đ", "`", "g", "h", ".", "k", "l"},
 		{"x", "~", "c", "v", "b", "n", "m"},
 	},
-	// Chinese: exact qwerty row shape — pinyin uses every qwerty letter except
-	// v, whose slot is taken by ü. Every dialect's tone is folded by
-	// lang.ChineseToneify into one of the four traditional Middle Chinese tone
-	// categories (see https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese))
-	// and appended as its own literal hanzi tile, so the same four tone keys
-	// cover every dialect's romanization.
+	// Every dialect's tone is folded by lang.ChineseToneify into one of the four traditional Middle Chinese
+	// tone categories (see https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese)),
+	// so the same four tone keys cover every dialect's romanization.
 	"chinese": {
 		{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
 		{"a", "s", "d", "f", "g", "h", "j", "k", "l"},
@@ -184,8 +185,7 @@ func isSyllabary(keyboardLayout string) bool {
 
 // resolveLayoutOverride returns the explicit preset layout for a language,
 // bypassing char-sampling detectLayout. Covers langLayoutMap plus Vietnamese
-// and all "Chinese (Dialect)" pseudo-languages, whose pinyin romanization
-// needs the tone-mark keys laid out in the "chinese" preset above.
+// and "Chinese (Dialect)" pseudo-languages, which need the tone-mark keys above.
 func resolveLayoutOverride(lng string) string {
 	if name, ok := langLayoutMap[lng]; ok {
 		return name
@@ -199,10 +199,9 @@ func resolveLayoutOverride(lng string) string {
 	return ""
 }
 
-// DefaultLengthForLang picks the default word length for a language before
-// its word list is even fetched: 3 for syllabary-style layouts (where each
-// "letter" carries more information, e.g. tone marks now occupy their own
-// tile), 6 otherwise.
+// DefaultLengthForLang picks the default word length before the word list is
+// fetched: 3 for syllabary-style layouts (each "letter" carries more info,
+// e.g. tone marks occupy their own tile), 6 otherwise.
 func DefaultLengthForLang(lng string) int {
 	name := resolveLayoutOverride(lng)
 	if name != "" && isSyllabary(name) {
@@ -211,10 +210,9 @@ func DefaultLengthForLang(lng string) int {
 	return 6
 }
 
-// langLayoutMap overrides script-detection for languages whose alphabet is a pure
-// rearrangement of qwerty's 26 ASCII letters (azerty, qwertz, geez), since
-// detectLayout has no unique chars to key off in that case. Keep this list small —
-// every other layout has distinguishing chars and auto-detects fine.
+// langLayoutMap overrides script-detection for languages whose alphabet is a
+// pure rearrangement of qwerty's 26 ASCII letters (azerty, qwertz, geez), since
+// detectLayout has no unique chars to key off. Keep small — others auto-detect fine.
 var langLayoutMap = map[string]string{
 	"English": "qwerty", "French": "azerty", "German": "qwertz",
 	"Amharic": "geez", "Tigrinya": "geez",
@@ -252,10 +250,9 @@ func detectLayout(words map[string]string) string {
 		layoutKeys[name] = s
 	}
 
-	// qwerty is the default: only switch to another layout if it covers chars
-	// that qwerty doesn't (e.g. æ, ğ, й). Layouts like nordic/turkish are supersets
-	// of qwerty's 26 letters, so plain-overlap scoring would tie on English/Spanish/etc
-	// and pick whichever layout the map happened to iterate to first.
+	// qwerty is the default: only switch if another layout covers chars qwerty
+	// doesn't (e.g. æ, ğ, й). nordic/turkish are supersets of qwerty's 26
+	// letters, so plain-overlap scoring would tie and pick an arbitrary one.
 	qwertyKeys := layoutKeys["qwerty"]
 	best, bestDistinct := "qwerty", 0
 	for name, keys := range layoutKeys {
@@ -409,7 +406,7 @@ func ComputeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 }
 
 // BuildGameExtras computes all derived UI data from the alphabet in one call.
-func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool) {
+func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool, matraMap map[string]string) {
 	var placedExact map[string]bool
 	keyboardRows, overflowBases, placedExact = BuildKeyboardData(alphabet, lng, words)
 	overflowSet := make(map[string]bool, len(overflowBases))
@@ -429,6 +426,8 @@ func BuildGameExtras(alphabet []string, lng string, words map[string]string) (ke
 	} else {
 		rtl = false
 	}
+
+	matraMap = lang.MatraTable(layoutName)
 
 	return
 }

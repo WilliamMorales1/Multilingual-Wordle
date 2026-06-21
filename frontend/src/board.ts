@@ -1,4 +1,5 @@
 import { S } from './state.js';
+import { markDisplay } from './keyboard.js';
 
 export function tileSize(wordLen: number): number {
   return Math.min(62, Math.max(28, Math.floor(310 / wordLen)));
@@ -48,7 +49,7 @@ export function setRowCaption(rowIdx: number, chars: string | undefined): void {
 export function setTileText(row: number, col: number, ch: string): void {
   const t = document.getElementById(`tile-${row}-${col}`);
   if (!t) return;
-  t.textContent = ch ? ch.toUpperCase() : '';
+  t.textContent = ch ? markDisplay(ch) : '';
   if (ch) {
     t.classList.add('filled');
     t.classList.remove('pop');
@@ -73,7 +74,7 @@ export function revealRow(rowIdx: number, chars: string[], states: string[], onD
     setTimeout(() => {
       t.classList.add('flipping');
       setTimeout(() => {
-        t.textContent = ch.toUpperCase();
+        t.textContent = markDisplay(ch);
         t.className = `tile ${states[i]} filled`;
       }, FLIP / 2);
     }, i * FLIP);

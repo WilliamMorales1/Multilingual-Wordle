@@ -10,6 +10,7 @@ export interface GameResult {
   overflow_bases: string[];
   equivalences: string[][];
   rtl: boolean;
+  matra_map?: Record<string, string> | null;
   answer?: string;
   answer_chars?: string;
   definition?: string;
@@ -75,4 +76,5 @@ export interface AppState {
   lastAttempt: number;
   rtl: boolean;
   history: string[][];
+  matraMap: Record<string, string>;
 }

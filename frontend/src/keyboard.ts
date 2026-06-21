@@ -4,6 +4,12 @@ export function stripDiacritics(s: string): string {
   return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
+// markDisplay prefixes a lone combining mark (e.g. a split-off matra tile)
+// with a dotted circle so it renders visibly instead of vanishing.
+export function markDisplay(ch: string): string {
+  return /^\p{M}$/u.test(ch) ? '◌' + ch : ch.toUpperCase();
+}
+
 export function buildKeyboard(rows: string[][] | null, overflowBases: Set<string>, onKey: (ch: string) => void, onEnter: () => void, onBack: () => void): void {
   const kb = document.getElementById('keyboard')!;
   kb.innerHTML = '';
@@ -32,8 +38,7 @@ export function buildKeyboard(rows: string[][] | null, overflowBases: Set<string
     rowEl.className = 'key-row';
 
     for (const char of rowChars) {
-      const label = /^\p{M}$/u.test(char) ? '◌' + char : char.toUpperCase();
-      const btn = makeKey(label, '', () => onKey(char));
+      const btn = makeKey(markDisplay(char), '', () => onKey(char));
       btn.dataset['char'] = char;
       rowEl.appendChild(btn);
     }
@@ -60,6 +65,23 @@ function makeKey(label: string, extra: string, handler: () => void): HTMLButtonE
   btn.textContent = label;
   btn.addEventListener('pointerdown', e => { e.preventDefault(); handler(); });
   return btn;
+}
+
+// refreshVowelKeys swaps abugida vowel keys between their independent form
+// (default, or after another vowel/matra) and combining (matra) form (right
+// after a consonant), per the matra map returned by the server.
+export function refreshVowelKeys(matraMap: Record<string, string>): void {
+  const vowelSet = new Set(Object.keys(matraMap));
+  if (vowelSet.size === 0) return;
+  const matraSet = new Set(Object.values(matraMap));
+  const prev = S.input[S.input.length - 1];
+  const useMatra = prev !== undefined && !vowelSet.has(prev) && !matraSet.has(prev) && !/^\p{M}+$/u.test(prev);
+
+  document.querySelectorAll<HTMLButtonElement>('.key[data-char]').forEach(btn => {
+    const baseChar = btn.dataset['char']!;
+    if (!vowelSet.has(baseChar)) return;
+    btn.textContent = markDisplay(useMatra ? matraMap[baseChar] : baseChar);
+  });
 }
 
 export function refreshKeyboard(): void {
