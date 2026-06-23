@@ -101,7 +101,14 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
     wiktLink.href = `https://en.wiktionary.org/wiki/${encodeURIComponent(wiktTerm)}#${encodeURIComponent(wiktLangSection)}`;
     wiktLink.style.display = 'inline';
 
-    document.getElementById('defText')!.textContent = lastResult.definition ?? '(no definition available)';
+    const defs = lastResult.definitions?.length ? lastResult.definitions : ['(no definition available)'];
+    const defText = document.getElementById('defText')!;
+    defText.textContent = '';
+    defs.forEach((d, i) => {
+      const line = document.createElement('div');
+      line.textContent = defs.length > 1 ? `${i + 1}. ${d}` : d;
+      defText.appendChild(line);
+    });
     const etyEl = document.getElementById('defEtymology')!;
     if (lastResult.etymology) {
       etyEl.textContent = `Etymology: ${lastResult.etymology}`;

@@ -256,7 +256,7 @@ func DefaultLengthForLang(lng string) int {
 // detectLayout has no unique chars to key off. Keep small — others auto-detect fine.
 var langLayoutMap = map[string]string{
 	"English": "qwerty", "French": "azerty", "German": "qwertz",
-	"Amharic": "geez", "Tigrinya": "geez",
+	"Amharic": "geez", "Tigrinya": "geez", "Japanese": "hiragana",
 }
 
 // detectLayout picks the preset layout that covers the most characters found in

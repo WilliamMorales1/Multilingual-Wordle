@@ -12,7 +12,7 @@ export interface GameResult {
   matra_map?: Record<string, string> | null;
   answer?: string;
   answer_chars?: string;
-  definition?: string;
+  definitions?: string[];
   etymology?: string;
   error?: string;
 }
@@ -33,7 +33,7 @@ export interface GuessResult {
   in_word_list: boolean;
   answer?: string;
   answer_chars?: string;
-  definition?: string;
+  definitions?: string[];
   etymology?: string;
   error?: string;
 }

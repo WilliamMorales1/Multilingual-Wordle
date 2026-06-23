@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -201,6 +202,40 @@ func firstGloss(entry KaikkiEntry) string {
 		}
 	}
 	return ""
+}
+
+// defSeparator joins multiple distinct definitions for the same word within
+// a single cached string entry — chosen because it can't appear in gloss
+// prose, unlike "; " or newline.
+const defSeparator = "\x1f"
+
+// maxDefs caps how many distinct definitions are kept per word; callers
+// display at most this many at game end.
+const maxDefs = 3
+
+// SplitDefinitions splits a cached definition string back into its
+// individual glosses (as accumulated by addDef).
+func SplitDefinitions(def string) []string {
+	return strings.Split(def, defSeparator)
+}
+
+// addDef appends gloss to the word's stored definition string if it's
+// non-empty, not a duplicate, and under maxDefs — used to accumulate
+// definitions from multiple dictionary entries/senses of the same word.
+func addDef(words map[string]string, word, gloss string) {
+	if gloss == "" {
+		return
+	}
+	existing := words[word]
+	if existing == "" {
+		words[word] = gloss
+		return
+	}
+	parts := strings.Split(existing, defSeparator)
+	if len(parts) >= maxDefs || slices.Contains(parts, gloss) {
+		return
+	}
+	words[word] = existing + defSeparator + gloss
 }
 
 // cangjieTableCachePath caches the hanzi->Cangjie-code table, which is
@@ -462,8 +497,9 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		hanziMap = make(map[string]string)
 	}
 	for r := range results {
-		if _, exists := words[r.word]; !exists {
-			words[r.word] = r.def
+		_, existed := words[r.word]
+		addDef(words, r.word, r.def)
+		if !existed {
 			if r.etymology != "" {
 				etymology[r.word] = r.etymology
 			}

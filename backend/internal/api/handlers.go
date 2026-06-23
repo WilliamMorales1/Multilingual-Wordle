@@ -49,7 +49,9 @@ func parseGuesses(records []store.GuessRecord, hanzi map[string]string) []guessR
 func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]string) {
 	resp["answer"] = game.Answer
 	if words, err := wordlist.GetCachedWordList(game.Lang, game.WordLength); err == nil {
-		resp["definition"] = words[game.Answer]
+		if def := words[game.Answer]; def != "" {
+			resp["definitions"] = wordlist.SplitDefinitions(def)
+		}
 	}
 	if chars := hanzi[game.Answer]; chars != "" {
 		resp["answer_chars"] = chars
