@@ -194,7 +194,7 @@ var keyboardLayouts = map[string][][]string{
 }
 
 func isSyllabary(keyboardLayout string) bool {
-	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "chinese", "cangjie"}
+	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "cangjie"}
 	if slices.Contains(marked, keyboardLayout) {
 		return true
 	}
@@ -447,7 +447,7 @@ func ComputeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 }
 
 // BuildGameExtras computes all derived UI data from the alphabet in one call.
-func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool, matraMap map[string]string) {
+func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool, matraMap map[string]string, layoutName string) {
 	var placedExact map[string]bool
 	keyboardRows, overflowBases, placedExact = BuildKeyboardData(alphabet, lng, words)
 	overflowSet := make(map[string]bool, len(overflowBases))
@@ -456,7 +456,7 @@ func BuildGameExtras(alphabet []string, lng string, words map[string]string) (ke
 	}
 	equivalences = ComputeEquivalences(alphabet, overflowSet, placedExact)
 
-	layoutName := resolveLayoutOverride(lng)
+	layoutName = resolveLayoutOverride(lng)
 	if layoutName == "" {
 		layoutName = detectLayout(words)
 	}

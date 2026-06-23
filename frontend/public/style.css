@@ -218,6 +218,51 @@ header h1 {
 .key.correct { background: var(--correct); color: #fff; }
 .key.present { background: var(--present); color: #fff; }
 .key.absent  { background: var(--absent);  color: #fff; }
+.flick-key {
+    position: relative;
+    width: var(--flick-key-size, 64px);
+    height: var(--flick-key-size, 64px);
+    padding: 0;
+}
+.flick-main {
+    font-size: calc(var(--flick-key-size, 64px) * 0.32);
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+}
+.flick-edge {
+    position: absolute;
+    font-size: calc(var(--flick-key-size, 64px) * 0.18);
+    font-weight: 600;
+    color: var(--key-text);
+    opacity: 0.6;
+    pointer-events: none;
+    line-height: 1;
+    transition: color 0.1s, opacity 0.1s, transform 0.1s;
+}
+.flick-up    { top: 2px;    left: 50%; transform: translateX(-50%); }
+.flick-down  { bottom: 2px; left: 50%; transform: translateX(-50%); }
+.flick-left  { left: 3px;   top: 50%;  transform: translateY(-50%); }
+.flick-right { right: 3px;  top: 50%;  transform: translateY(-50%); }
+
+.flick-key.flick-active-up    .flick-up,
+.flick-key.flick-active-down  .flick-down,
+.flick-key.flick-active-left  .flick-left,
+.flick-key.flick-active-right .flick-right {
+    color: var(--key-bg);
+    opacity: 1;
+    background: var(--key-text);
+    border-radius: 4px;
+    padding: 1px 4px;
+}
+.flick-key.flick-active-up    { transform: translateY(-6px); }
+.flick-key.flick-active-down  { transform: translateY(6px); }
+.flick-key.flick-active-left  { transform: translateX(-6px); }
+.flick-key.flick-active-right { transform: translateX(6px); }
+.flick-action {
+    font-size: calc(var(--flick-key-size, 92px) * 0.22);
+    font-weight: 700;
+}
 #no-keyboard {
     text-align: center;
     color: var(--subtext);

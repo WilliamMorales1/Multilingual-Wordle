@@ -6,6 +6,7 @@ export interface GameResult {
   guesses: GuessRecord[];
   alphabet: string[] | null;
   keyboard_rows: string[][] | null;
+  keyboard_layout?: string;
   overflow_bases: string[];
   equivalences: string[][];
   rtl: boolean;
@@ -60,7 +61,7 @@ export interface NewGameRequest {
   lang: string;
 }
 
-export type GameStatus = 'idle' | 'loading' | 'playing' | 'submitting' | 'won';
+export type GameStatus = 'idle' | 'loading' | 'playing' | 'submitting' | 'won' | 'lost';
 
 export interface AppState {
   gameId: number | null;

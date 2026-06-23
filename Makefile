@@ -21,7 +21,7 @@ watch-backend:
 	cd backend && air
 
 clean:
-	rm -f backend/wordgo
+	rm -f backend/wordgo.db
 	rm -rf backend/tmp
 	rm -f frontend/public/script.js
 	rm -rf backend/cache

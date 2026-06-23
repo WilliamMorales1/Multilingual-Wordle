@@ -1,7 +1,7 @@
 import { S } from './state.js';
 import { api } from './api.js';
 import { buildBoard, updateCurrentRow, revealRow, bounceRow, shakeRow, setRowCaption } from './board.js';
-import { buildKeyboard, refreshKeyboard, refreshVowelKeys, stripDiacritics, markDisplay } from './keyboard.js';
+import { buildKeyboard, buildFlickKeyboard, refreshKeyboard, refreshVowelKeys, stripDiacritics, markDisplay } from './keyboard.js';
 import { toast, openModal, closeModal, showEquivNotice, showStats } from './ui.js';
 
 let _progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -116,6 +116,10 @@ export async function onEnter(): Promise<void> {
       const msgs = ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'];
       toast(msgs[Math.min(result.attempt - 1, msgs.length - 1)], 0);
       setTimeout(() => showStats(result), 2000);
+    } else if (result.status === 'lost') {
+      S.status = 'lost';
+      toast(result.answer!.toUpperCase(), 0);
+      setTimeout(() => showStats(result), 2500);
     }
   });
 }
@@ -165,7 +169,8 @@ export async function startGame(): Promise<void> {
   document.getElementById('keyboard')!.style.display = '';
 
   buildBoard();
-  buildKeyboard(result.keyboard_rows ?? null, new Set(result.overflow_bases ?? []), onKeyPress, onEnter, onBackspace);
+  const buildFn = result.keyboard_layout === 'hiragana' ? buildFlickKeyboard : buildKeyboard;
+  buildFn(result.keyboard_rows ?? null, new Set(result.overflow_bases ?? []), onKeyPress, onEnter, onBackspace);
   refreshVowelKeys(S.matraMap);
   showEquivNotice(result.equivalences ?? []);
 }

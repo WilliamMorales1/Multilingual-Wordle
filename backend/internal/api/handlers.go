@@ -121,19 +121,20 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength)
 
 	alphabet := lang.BuildAlphabet(words, lang.ToneSplitKind(req.Lang))
-	keyboardRows, overflowBases, equivalences, rtl, matraMap := keyboard.BuildGameExtras(alphabet, req.Lang, words)
+	keyboardRows, overflowBases, equivalences, rtl, matraMap, layoutName := keyboard.BuildGameExtras(alphabet, req.Lang, words)
 	jsonOK(w, map[string]any{
-		"id":             game.ID,
-		"lang":           game.Lang,
-		"word_length":    game.WordLength,
-		"status":         game.Status,
-		"guesses":        []guessResp{},
-		"alphabet":       alphabet,
-		"keyboard_rows":  keyboardRows,
-		"overflow_bases": overflowBases,
-		"equivalences":   equivalences,
-		"rtl":            rtl,
-		"matra_map":      matraMap,
+		"id":              game.ID,
+		"lang":            game.Lang,
+		"word_length":     game.WordLength,
+		"status":          game.Status,
+		"guesses":         []guessResp{},
+		"alphabet":        alphabet,
+		"keyboard_rows":   keyboardRows,
+		"keyboard_layout": layoutName,
+		"overflow_bases":  overflowBases,
+		"equivalences":    equivalences,
+		"rtl":             rtl,
+		"matra_map":       matraMap,
 	})
 }
 
@@ -157,24 +158,26 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	var equivalences [][]string
 	var rtl bool
 	var matraMap map[string]string
+	var layoutName string
 	if words := wordlist.GetWordListIfCached(game.Lang, game.WordLength); words != nil {
 		alphabet = lang.BuildAlphabet(words, lang.ToneSplitKind(game.Lang))
-		keyboardRows, overflowBases, equivalences, rtl, matraMap = keyboard.BuildGameExtras(alphabet, game.Lang, words)
+		keyboardRows, overflowBases, equivalences, rtl, matraMap, layoutName = keyboard.BuildGameExtras(alphabet, game.Lang, words)
 	}
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
 	resp := map[string]any{
-		"id":             game.ID,
-		"lang":           game.Lang,
-		"word_length":    game.WordLength,
-		"status":         game.Status,
-		"guesses":        parseGuesses(game.Guesses, hanzi),
-		"alphabet":       alphabet,
-		"keyboard_rows":  keyboardRows,
-		"overflow_bases": overflowBases,
-		"equivalences":   equivalences,
-		"rtl":            rtl,
-		"matra_map":      matraMap,
+		"id":              game.ID,
+		"lang":            game.Lang,
+		"word_length":     game.WordLength,
+		"status":          game.Status,
+		"guesses":         parseGuesses(game.Guesses, hanzi),
+		"alphabet":        alphabet,
+		"keyboard_rows":   keyboardRows,
+		"keyboard_layout": layoutName,
+		"overflow_bases":  overflowBases,
+		"equivalences":    equivalences,
+		"rtl":             rtl,
+		"matra_map":       matraMap,
 	}
 	if game.Status != "playing" {
 		addAnswerReveal(resp, game, hanzi)
@@ -266,6 +269,8 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	const maxGuesses = 6
+
 	won := true
 	for _, st := range states {
 		if st != "correct" {
@@ -273,9 +278,14 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	lost := !won && attempt >= maxGuesses
 	newStatus := game.Status
 	if won {
 		newStatus = "won"
+	} else if lost {
+		newStatus = "lost"
+	}
+	if won || lost {
 		if err := store.UpdateGameStatus(game.ID, newStatus); err != nil {
 			slog.Error("failed to update game status", "id", game.ID, "error", err)
 		}
@@ -294,7 +304,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	if chars := hanzi[guess]; chars != "" {
 		resp["chars"] = chars
 	}
-	if won {
+	if won || lost {
 		addAnswerReveal(resp, game, hanzi)
 	}
 

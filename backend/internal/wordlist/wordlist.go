@@ -66,10 +66,14 @@ var excludedSenseTags = map[string]bool{
 
 // isExcludedEntry reports whether an entry should be skipped because it (or
 // all of its senses) is tagged as a proper noun, given name, or surname.
+// For Japanese and Ainu, "non-lemma forms" is not excluded — kana spellings
+// of kanji words (e.g. わたし, あした) are tagged non-lemma but are the only
+// form that passes IsPureHiragana, so excluding them would drop the word.
 func isExcludedEntry(entry KaikkiEntry) bool {
 	if strings.EqualFold(entry.Pos, "name") {
 		return true
 	}
+	allowNonLemma := lang.IsJapaneseLang(entry.Lang) || lang.IsHangulLang(entry.Lang)
 	for _, sense := range entry.Senses {
 		tags, ok := sense["tags"].([]any)
 		if !ok {
@@ -77,7 +81,14 @@ func isExcludedEntry(entry KaikkiEntry) bool {
 		}
 		for _, t := range tags {
 			tag, ok := t.(string)
-			if ok && excludedSenseTags[strings.ToLower(tag)] {
+			if !ok {
+				continue
+			}
+			tag = strings.ToLower(tag)
+			if tag == "non-lemma forms" && allowNonLemma {
+				continue
+			}
+			if excludedSenseTags[tag] {
 				return true
 			}
 		}
@@ -462,6 +473,11 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 						if !lang.IsPureHiragana(word) {
 							continue
 						}
+					} else if strings.EqualFold(lng, "Cherokee") {
+						// Cherokee's lower-case block (Unicode 8 Cherokee
+						// Supplement) isn't real orthography — everyday text
+						// and the keyboard layout both use upper-case only.
+						word = entry.Word
 					}
 				}
 				if !lang.IsValid(word, length, toneLang) {
@@ -498,6 +514,9 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	}
 	for r := range results {
 		_, existed := words[r.word]
+		if !existed {
+			words[r.word] = ""
+		}
 		addDef(words, r.word, r.def)
 		if !existed {
 			if r.etymology != "" {
