@@ -2,7 +2,7 @@
 
 Live at [multilingual-wordle.fly.dev/](multilingual-wordle.fly.dev/)
 
-A multilingual Wordle game written in Go & Typescript that works with **any language** on Wiktionary — English, Spanish, French, Russian, Arabic, Greek, Hebrew, Thai, and more.
+A multilingual Wordle game written in Go & Typescript that works with **any language** on Wiktionary — English, Spanish, French, Russian, Arabic, Greek, Hebrew, Thai, and more. Word per language resets daily.
 
 ## Features
 

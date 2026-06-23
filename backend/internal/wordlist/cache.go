@@ -1,9 +1,11 @@
 package wordlist
 
 import (
+	"hash/fnv"
 	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"wordgo/internal/keyboard"
 	"wordgo/internal/lang"
@@ -35,6 +37,23 @@ var wlCache = &wordListStore{
 
 // DownloadProgress tracks in-flight word downloads: "lang:len" → count.
 var DownloadProgress sync.Map
+
+// DailyAnswer picks one word per UTC calendar day for a given language/length,
+// deterministically from a hash of the date so every player sees the same
+// answer that day, like regular Wordle.
+func DailyAnswer(lng string, length int, words map[string]string) string {
+	keys := make([]string, 0, len(words))
+	for w := range words {
+		keys = append(keys, w)
+	}
+	sort.Strings(keys)
+
+	h := fnv.New64a()
+	h.Write([]byte(time.Now().UTC().Format("2006-01-02")))
+	h.Write([]byte(lng))
+	idx := int(h.Sum64() % uint64(len(keys)))
+	return keys[idx]
+}
 
 func GetCachedWordList(lng string, length int) (map[string]string, error) {
 	key := Key{lng, length}

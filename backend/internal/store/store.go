@@ -47,7 +47,6 @@ func createTables() error {
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
 			lang        TEXT NOT NULL,
 			word_length INTEGER NOT NULL,
-			max_guesses INTEGER NOT NULL,
 			answer      TEXT NOT NULL,
 			status      TEXT NOT NULL DEFAULT 'playing'
 		);
@@ -65,8 +64,8 @@ func createTables() error {
 
 func CreateGame(g *Game) error {
 	res, err := db.Exec(
-		`INSERT INTO games (lang, word_length, max_guesses, answer, status) VALUES (?, ?, ?, ?, ?)`,
-		g.Lang, g.WordLength, g.MaxGuesses, g.Answer, g.Status,
+		`INSERT INTO games (lang, word_length, answer, status) VALUES (?, ?, ?, ?)`,
+		g.Lang, g.WordLength, g.Answer, g.Status,
 	)
 	if err != nil {
 		return err
@@ -82,8 +81,8 @@ func CreateGame(g *Game) error {
 func GetGame(id uint) (*Game, error) {
 	g := &Game{}
 	err := db.QueryRow(
-		`SELECT id, lang, word_length, max_guesses, answer, status FROM games WHERE id = ?`, id,
-	).Scan(&g.ID, &g.Lang, &g.WordLength, &g.MaxGuesses, &g.Answer, &g.Status)
+		`SELECT id, lang, word_length, answer, status FROM games WHERE id = ?`, id,
+	).Scan(&g.ID, &g.Lang, &g.WordLength, &g.Answer, &g.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +127,7 @@ func UpdateGameStatus(id uint, status string) error {
 }
 
 func GetCompletedGames(lang string, length int) ([]Game, error) {
-	query := `SELECT id, status FROM games WHERE status IN ('won', 'lost')`
+	query := `SELECT id, status FROM games WHERE status = 'won'`
 	args := []any{}
 	if lang != "" {
 		query += ` AND lang = ?`

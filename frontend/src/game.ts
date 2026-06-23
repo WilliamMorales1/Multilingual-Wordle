@@ -116,32 +116,26 @@ export async function onEnter(): Promise<void> {
       const msgs = ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'];
       toast(msgs[Math.min(result.attempt - 1, msgs.length - 1)], 0);
       setTimeout(() => showStats(result), 2000);
-    } else if (result.status === 'lost') {
-      S.status = 'lost';
-      toast(result.answer!.toUpperCase(), 0);
-      setTimeout(() => showStats(result), 2500);
     }
   });
 }
 
 export async function startGame(): Promise<void> {
-  const lang       = (document.getElementById('langInput') as HTMLInputElement).value.trim() || 'English';
-  const length     = parseInt((document.getElementById('lengthInput') as HTMLInputElement).value) || 0;
-  const maxGuesses = parseInt((document.getElementById('guessesInput') as HTMLInputElement).value) || 6;
+  const lang = (document.getElementById('langInput') as HTMLInputElement).value.trim() || 'English';
 
   closeModal('settingsModal');
 
-  Object.assign(S, { lang, wordLength: length, maxGuesses, status: 'loading', currentRow: 0, input: [], charStates: {}, gameId: null, history: [] });
+  Object.assign(S, { lang, status: 'loading', currentRow: 0, input: [], charStates: {}, gameId: null, history: [] });
 
   document.getElementById('loading')!.style.display  = 'flex';
   document.getElementById('board')!.style.display    = 'none';
   document.getElementById('keyboard')!.style.display = 'none';
 
-  startProgressPolling(lang, length);
+  startProgressPolling(lang, S.wordLength);
 
   let result;
   try {
-    result = await api.newGame({ lang, length, max_guesses: maxGuesses });
+    result = await api.newGame({ lang });
   } catch (_) {
     stopProgressPolling();
     toast('Network error — could not start game');

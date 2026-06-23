@@ -2,7 +2,6 @@ export interface GameResult {
   id: number;
   lang: string;
   word_length: number;
-  max_guesses: number;
   status: string;
   guesses: GuessRecord[];
   alphabet: string[] | null;
@@ -59,16 +58,13 @@ export interface LanguagesResult {
 
 export interface NewGameRequest {
   lang: string;
-  length: number;
-  max_guesses: number;
 }
 
-export type GameStatus = 'idle' | 'loading' | 'playing' | 'submitting' | 'won' | 'lost';
+export type GameStatus = 'idle' | 'loading' | 'playing' | 'submitting' | 'won';
 
 export interface AppState {
   gameId: number | null;
   wordLength: number;
-  maxGuesses: number;
   lang: string;
   status: GameStatus;
   currentRow: number;

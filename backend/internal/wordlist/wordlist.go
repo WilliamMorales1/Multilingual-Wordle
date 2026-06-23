@@ -23,9 +23,8 @@ import (
 )
 
 const (
-	DefaultLang    = "English"
-	DefaultLength  = 6
-	DefaultGuesses = 6
+	DefaultLang   = "English"
+	DefaultLength = 6
 )
 
 // dataPath resolves name relative to DATA_DIR (or the working directory if unset).

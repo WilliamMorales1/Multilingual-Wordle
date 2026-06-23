@@ -39,9 +39,9 @@ export function showEquivNotice(equivalences: string[][]): void {
 const STATE_EMOJI: Record<string, string> = { correct: '🟩', present: '🟨', absent: '⬛' };
 
 function buildShareText(): string {
-  const n     = S.status === 'won' ? String(S.history.length) : 'X';
+  const n     = String(S.history.length);
   const grid  = S.history.map(row => row.map(st => STATE_EMOJI[st] ?? '⬛').join('')).join('\n');
-  return `Wordgo — ${S.lang} (${S.wordLength}) ${n}/${S.maxGuesses}\n\n${grid}`;
+  return `Wordgo — ${S.lang} (${S.wordLength}) ${n}\n\n${grid}`;
 }
 
 export async function shareResult(): Promise<void> {
@@ -75,8 +75,9 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
   const container = document.getElementById('distContainer')!;
   container.innerHTML = '';
   const maxCount = Math.max(...Object.values(dist).map(Number), 1);
+  const maxRow = Math.max(...Object.keys(dist).map(Number), S.lastAttempt, 6);
 
-  for (let i = 1; i <= S.maxGuesses; i++) {
+  for (let i = 1; i <= maxRow; i++) {
     const count = dist[i] ?? 0;
     const pct   = Math.max(7, Math.round(count / maxCount * 100));
     const highlight = (S.status === 'won' && i === S.lastAttempt) ? ' highlight' : '';
@@ -114,7 +115,7 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
   }
 
   const shareBtn = document.getElementById('shareBtn')!;
-  shareBtn.hidden = !(S.status === 'won' || S.status === 'lost') || S.history.length === 0;
+  shareBtn.hidden = S.status !== 'won' || S.history.length === 0;
 
   openModal('statsModal');
 }

@@ -5,37 +5,49 @@ export function tileSize(wordLen: number): number {
   return Math.min(62, Math.max(28, Math.floor(310 / wordLen)));
 }
 
+// INITIAL_ROWS is how many guess rows are shown up front. Guessing is
+// unlimited, so ensureRow appends more on demand once these run out.
+const INITIAL_ROWS = 6;
+
+function appendRow(board: HTMLElement, r: number): void {
+  const wrap = document.createElement('div');
+  wrap.className = 'board-row-wrap';
+
+  const row = document.createElement('div');
+  row.className = 'board-row';
+  row.id = `row-${r}`;
+  row.style.gridTemplateColumns = `repeat(${S.wordLength}, 1fr)`;
+  if (S.rtl) row.dir = 'rtl';
+  for (let c = 0; c < S.wordLength; c++) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.id = `tile-${r}-${c}`;
+    row.appendChild(tile);
+  }
+  wrap.appendChild(row);
+
+  const caption = document.createElement('div');
+  caption.className = 'row-caption';
+  caption.id = `caption-${r}`;
+  wrap.appendChild(caption);
+
+  board.appendChild(wrap);
+}
+
 export function buildBoard(): void {
   const board = document.getElementById('board')!;
   const sz = tileSize(S.wordLength);
   board.innerHTML = '';
-  board.style.gridTemplateRows = `repeat(${S.maxGuesses}, 1fr)`;
   document.documentElement.style.setProperty('--tile-size', sz + 'px');
 
-  for (let r = 0; r < S.maxGuesses; r++) {
-    const wrap = document.createElement('div');
-    wrap.className = 'board-row-wrap';
+  for (let r = 0; r < INITIAL_ROWS; r++) appendRow(board, r);
+}
 
-    const row = document.createElement('div');
-    row.className = 'board-row';
-    row.id = `row-${r}`;
-    row.style.gridTemplateColumns = `repeat(${S.wordLength}, 1fr)`;
-    if (S.rtl) row.dir = 'rtl';
-    for (let c = 0; c < S.wordLength; c++) {
-      const tile = document.createElement('div');
-      tile.className = 'tile';
-      tile.id = `tile-${r}-${c}`;
-      row.appendChild(tile);
-    }
-    wrap.appendChild(row);
-
-    const caption = document.createElement('div');
-    caption.className = 'row-caption';
-    caption.id = `caption-${r}`;
-    wrap.appendChild(caption);
-
-    board.appendChild(wrap);
-  }
+// ensureRow appends a new board row if rowIdx isn't built yet — guessing has
+// no cap, so the board grows past its initial rows as needed.
+export function ensureRow(rowIdx: number): void {
+  if (document.getElementById(`row-${rowIdx}`)) return;
+  appendRow(document.getElementById('board')!, rowIdx);
 }
 
 // setRowCaption shows romanized words' original characters (e.g. Chinese
@@ -61,6 +73,7 @@ export function setTileText(row: number, col: number, ch: string): void {
 }
 
 export function updateCurrentRow(): void {
+  ensureRow(S.currentRow);
   for (let c = 0; c < S.wordLength; c++) {
     setTileText(S.currentRow, c, S.input[c] ?? '');
   }

@@ -7,7 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"wordgo/internal/api"
-	"wordgo/internal/logger"
+	"wordgo/internal/log"
 	"wordgo/internal/store"
 )
 

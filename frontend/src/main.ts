@@ -18,6 +18,13 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 });
 
 document.getElementById('startBtn')!.addEventListener('click', startGame);
+document.getElementById('settingsModal')!.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === 'INPUT') return; // langInput has its own Enter handling
+  e.preventDefault();
+  startGame();
+});
 document.getElementById('settingsBtn')!.addEventListener('click', () => openModal('settingsModal'));
 document.getElementById('statsBtn')!.addEventListener('click', () => showStats(null));
 document.getElementById('closeStats')!.addEventListener('click', () => closeModal('statsModal'));
@@ -53,13 +60,53 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
   if (!input || !options) return;
 
   let allLangs: string[] = [];
-  let defaultLengths: Record<string, number> = {};
   let activeIdx = -1;
+  const unused = [
+    'Chinese',
+    'Cantonese',
+    'Hokkien',
+    'All languages combined',
+    'Assyrian Neo-Aramaic',
+    'Franco-Provençal',
+    'Gawar-Bati',
+    'Ge\'ez',
+    'Ghomala\'',
+    'Hamer-Banna',
+    'K\'iche\'',
+    'Komi-Zyrian',
+    'Old Galician-Portuguese',
+    'Proto-Balto-Slavic',
+    'Proto-Bantu',
+    'Proto-Brythonic',
+    'Proto-Celtic',
+    'Proto-Finnic',
+    'Proto-Germanic',
+    'Proto-Indo-European',
+    'Proto-Indo-Iranian',
+    'Proto-Italic',
+    'Proto-Japonic',
+    'Proto-Malayo-Polynesian',
+    'Proto-Permic',
+    'Proto-Ryukyuan',
+    'Proto-Samic',
+    'Proto-Samoyedic',
+    'Proto-Sino-Tibetan',
+    'Proto-Slavic',
+    'Proto-Turkic',
+    'Proto-Uralic',
+    'Proto-West Germanic',
+    'Rwanda-Rundi',
+    'S\'gaw Karen',
+    'Serbo-Croatian',
+    'Urak Lawoi\'',
+    'Waray-Waray',
+    'Yao (Africa)',
+    'Ye\'kwana',
+  ];
 
   try {
     const data = await api.languages();
-    allLangs = (data.languages ?? []).filter(l => !['Chinese', 'Cantonese', 'Hokkien'].includes(l));
-    defaultLengths = data.default_lengths ?? {};
+    allLangs = (data.languages ?? []).filter(l => !unused.includes(l));
   } catch (_) {}
 
   function render(filter: string): void {
@@ -81,8 +128,6 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     input!.value = lang;
     options!.hidden = true;
     activeIdx = -1;
-    const lengthInput = document.getElementById('lengthInput') as HTMLInputElement | null;
-    if (lengthInput) lengthInput.value = String(defaultLengths[lang] ?? 6);
   }
 
   function setActive(idx: number): void {
@@ -98,10 +143,14 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
   input.addEventListener('blur',  () => setTimeout(() => { options.hidden = true; }, 150));
   input.addEventListener('keydown', e => {
     const opts = options.querySelectorAll<HTMLElement>('.lang-option');
-    if (options.hidden || opts.length === 0) return;
+    if (options.hidden || opts.length === 0) {
+      if (e.key === 'Enter') { e.preventDefault(); startGame(); }
+      return;
+    }
     if      (e.key === 'ArrowDown')               { e.preventDefault(); setActive(activeIdx + 1); }
     else if (e.key === 'ArrowUp')                 { e.preventDefault(); setActive(activeIdx - 1); }
     else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); select(opts[activeIdx].textContent!); }
+    else if (e.key === 'Enter')                   { e.preventDefault(); options.hidden = true; startGame(); }
     else if (e.key === 'Escape')                  { options.hidden = true; }
   });
 })();

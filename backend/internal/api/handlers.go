@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"wordgo/internal/keyboard"
 	"wordgo/internal/lang"
@@ -47,7 +45,7 @@ func parseGuesses(records []store.GuessRecord, hanzi map[string]string) []guessR
 	return out
 }
 
-// addAnswerReveal fills in answer/definition/chars/etymology once a game is won or lost.
+// addAnswerReveal fills in answer/definition/chars/etymology once a game is won.
 func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]string) {
 	resp["answer"] = game.Answer
 	if words, err := wordlist.GetCachedWordList(game.Lang, game.WordLength); err == nil {
@@ -87,9 +85,7 @@ func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 // HandleNewGame handles POST /api/game.
 func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Lang       string `json:"lang"`
-		Length     int    `json:"length"`
-		MaxGuesses int    `json:"max_guesses"`
+		Lang string `json:"lang"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonErr(w, err.Error(), http.StatusBadRequest)
@@ -99,38 +95,19 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	if req.Lang == "" {
 		req.Lang = wordlist.DefaultLang
 	}
-	if req.Length == 0 {
-		req.Length = keyboard.DefaultLengthForLang(req.Lang)
-	}
-	if req.MaxGuesses == 0 {
-		req.MaxGuesses = wordlist.DefaultGuesses
-	}
-	if req.Length < 2 || req.Length > 20 {
-		jsonErr(w, "length must be between 2 and 20", http.StatusBadRequest)
-		return
-	}
-	if req.MaxGuesses < 1 || req.MaxGuesses > 30 {
-		jsonErr(w, "max_guesses must be between 1 and 30", http.StatusBadRequest)
-		return
-	}
+	length := keyboard.DefaultLengthForLang(req.Lang)
 
-	words, err := wordlist.GetCachedWordList(req.Lang, req.Length)
+	words, err := wordlist.GetCachedWordList(req.Lang, length)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	wordSlice := make([]string, 0, len(words))
-	for word := range words {
-		wordSlice = append(wordSlice, word)
-	}
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	answer := wordSlice[rng.Intn(len(wordSlice))]
+	answer := wordlist.DailyAnswer(req.Lang, length, words)
 
 	game := store.Game{
 		Lang:       req.Lang,
-		WordLength: req.Length,
-		MaxGuesses: req.MaxGuesses,
+		WordLength: length,
 		Answer:     answer,
 		Status:     "playing",
 	}
@@ -139,7 +116,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to create game", http.StatusInternalServerError)
 		return
 	}
-	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength, "max_guesses", game.MaxGuesses)
+	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength)
 
 	alphabet := lang.BuildAlphabet(words, lang.ToneSplitKind(req.Lang))
 	keyboardRows, overflowBases, equivalences, rtl, matraMap := keyboard.BuildGameExtras(alphabet, req.Lang, words)
@@ -147,7 +124,6 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		"id":             game.ID,
 		"lang":           game.Lang,
 		"word_length":    game.WordLength,
-		"max_guesses":    game.MaxGuesses,
 		"status":         game.Status,
 		"guesses":        []guessResp{},
 		"alphabet":       alphabet,
@@ -189,7 +165,6 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 		"id":             game.ID,
 		"lang":           game.Lang,
 		"word_length":    game.WordLength,
-		"max_guesses":    game.MaxGuesses,
 		"status":         game.Status,
 		"guesses":        parseGuesses(game.Guesses, hanzi),
 		"alphabet":       alphabet,
@@ -296,14 +271,9 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	lost := !won && attempt >= game.MaxGuesses
 	newStatus := game.Status
 	if won {
 		newStatus = "won"
-	} else if lost {
-		newStatus = "lost"
-	}
-	if won || lost {
 		if err := store.UpdateGameStatus(game.ID, newStatus); err != nil {
 			slog.Error("failed to update game status", "id", game.ID, "error", err)
 		}
@@ -322,7 +292,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	if chars := hanzi[guess]; chars != "" {
 		resp["chars"] = chars
 	}
-	if won || lost {
+	if won {
 		addAnswerReveal(resp, game, hanzi)
 	}
 

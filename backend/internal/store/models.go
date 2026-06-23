@@ -4,7 +4,6 @@ type Game struct {
 	ID         uint          `json:"id"`
 	Lang       string        `json:"lang"`
 	WordLength int           `json:"word_length"`
-	MaxGuesses int           `json:"max_guesses"`
 	Answer     string        `json:"-"`
 	Status     string        `json:"status"`
 	Guesses    []GuessRecord `json:"guesses"`
