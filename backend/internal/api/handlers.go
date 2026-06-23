@@ -393,7 +393,12 @@ func HandleGetStats(w http.ResponseWriter, r *http.Request) {
 
 // HandleGetLanguages handles GET /api/languages.
 func HandleGetLanguages(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, map[string]any{"languages": wordlist.GetCachedLanguages()})
+	langs := wordlist.GetCachedLanguages()
+	defaultLengths := make(map[string]int, len(langs))
+	for _, l := range langs {
+		defaultLengths[l] = keyboard.DefaultLengthForLang(l)
+	}
+	jsonOK(w, map[string]any{"languages": langs, "default_lengths": defaultLengths})
 }
 
 // HandleGetProgress handles GET /api/progress?lang=X&length=Y.

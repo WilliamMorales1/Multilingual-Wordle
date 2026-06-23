@@ -201,6 +201,14 @@ func isSyllabary(keyboardLayout string) bool {
 	return false
 }
 
+// isTonal reports whether a layout splits tone marks into their own tiles
+// (Vietnamese diacritics, Chinese dialect tone-category hanzi), which makes
+// each "letter" of a normal-length word span more tiles than non-tonal
+// syllabaries — so it needs a longer default word length.
+func isTonal(keyboardLayout string) bool {
+	return keyboardLayout == "vietnamese" || keyboardLayout == "chinese"
+}
+
 // resolveLayoutOverride returns the explicit preset layout for a language,
 // bypassing char-sampling detectLayout. Covers langLayoutMap plus Vietnamese
 // and "Chinese (Dialect)" pseudo-languages, which need the tone-mark keys above.
@@ -224,13 +232,18 @@ func resolveLayoutOverride(lng string) string {
 }
 
 // DefaultLengthForLang picks the default word length before the word list is
-// fetched: 4 for Cangjie (average root-glyph code length per character), 3
-// for other syllabary-style layouts (each "letter" carries more info, e.g.
-// tone marks occupy their own tile), 6 otherwise.
+// fetched: 4 for Cangjie (average root-glyph code length per character), 8
+// for tonal layouts (Vietnamese, Chinese dialects — tone marks split into
+// their own tiles, so a normal-length word needs more tiles to fit), 3 for
+// other syllabary-style layouts (each "letter" carries more info), 6
+// otherwise.
 func DefaultLengthForLang(lng string) int {
 	name := resolveLayoutOverride(lng)
 	if name == "cangjie" {
 		return 4
+	}
+	if isTonal(name) {
+		return 8
 	}
 	if name != "" && isSyllabary(name) {
 		return 3

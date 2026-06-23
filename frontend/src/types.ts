@@ -54,6 +54,7 @@ export interface ProgressResult {
 
 export interface LanguagesResult {
   languages: string[];
+  default_lengths?: Record<string, number>;
 }
 
 export interface NewGameRequest {

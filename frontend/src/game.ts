@@ -126,7 +126,7 @@ export async function onEnter(): Promise<void> {
 
 export async function startGame(): Promise<void> {
   const lang       = (document.getElementById('langInput') as HTMLInputElement).value.trim() || 'English';
-  const length     = parseInt((document.getElementById('lengthInput') as HTMLInputElement).value) || 6;
+  const length     = parseInt((document.getElementById('lengthInput') as HTMLInputElement).value) || 0;
   const maxGuesses = parseInt((document.getElementById('guessesInput') as HTMLInputElement).value) || 6;
 
   closeModal('settingsModal');
@@ -161,10 +161,11 @@ export async function startGame(): Promise<void> {
     return;
   }
 
-  S.gameId   = result.id;
-  S.status   = 'playing';
-  S.rtl      = result.rtl ?? false;
-  S.matraMap = result.matra_map ?? {};
+  S.gameId    = result.id;
+  S.status    = 'playing';
+  S.wordLength = result.word_length;
+  S.rtl       = result.rtl ?? false;
+  S.matraMap  = result.matra_map ?? {};
 
   document.getElementById('board')!.style.display    = '';
   document.getElementById('keyboard')!.style.display = '';

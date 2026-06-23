@@ -53,11 +53,13 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
   if (!input || !options) return;
 
   let allLangs: string[] = [];
+  let defaultLengths: Record<string, number> = {};
   let activeIdx = -1;
 
   try {
     const data = await api.languages();
-    allLangs = (data.languages ?? []).filter(l => l !== 'Chinese');
+    allLangs = (data.languages ?? []).filter(l => !['Chinese', 'Cantonese', 'Hokkien'].includes(l));
+    defaultLengths = data.default_lengths ?? {};
   } catch (_) {}
 
   function render(filter: string): void {
@@ -80,7 +82,7 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
     options!.hidden = true;
     activeIdx = -1;
     const lengthInput = document.getElementById('lengthInput') as HTMLInputElement | null;
-    if (lengthInput) lengthInput.value = '6';
+    if (lengthInput) lengthInput.value = String(defaultLengths[lang] ?? 6);
   }
 
   function setActive(idx: number): void {

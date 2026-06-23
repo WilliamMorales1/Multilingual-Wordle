@@ -6,7 +6,6 @@ package lang
 import (
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -499,31 +498,23 @@ func isCheckedCoda(letters string) bool {
 	return false
 }
 
-func filterLetterMarks(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if IsWordChar(r) {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+// superscriptDigits maps Unicode superscript-numeral runes (U+00B9/00B2/00B3,
+// U+2074-2079) to their digit value — kaikki's Cantonese/Hokkien/etc. zh_pron
+// tone numbers are rendered as superscripts (e.g. "aa³ gwaa¹"), not plain
+// ASCII digits.
+var superscriptDigits = map[rune]int{
+	'⁰': 0, '¹': 1, '²': 2, '³': 3, '⁴': 4,
+	'⁵': 5, '⁶': 6, '⁷': 7, '⁸': 8, '⁹': 9,
 }
 
-// splitTrailingDigits peels a trailing run of ASCII digits (a romanization's
-// tone number) off a syllable token.
-func splitTrailingDigits(s string) (string, int) {
-	end := len(s)
-	for end > 0 && s[end-1] >= '0' && s[end-1] <= '9' {
-		end--
+func digitValue(r rune) (int, bool) {
+	if r >= '0' && r <= '9' {
+		return int(r - '0'), true
 	}
-	if end == len(s) {
-		return s, 0
+	if n, ok := superscriptDigits[r]; ok {
+		return n, true
 	}
-	n, err := strconv.Atoi(s[end:])
-	if err != nil {
-		return s, 0
-	}
-	return s[:end], n
+	return 0, false
 }
 
 // mandarinToneify folds pinyin's diacritic tone marks into trailing 平/上/去
@@ -562,18 +553,24 @@ func mandarinToneify(rom string) string {
 // ChineseToneify converts a dialect's raw romanization into a guessable word
 // where each syllable's tone is folded into one of the four tone-category
 // hanzi (TonePing/ToneShang/ToneQu/ToneRu), appended as its own tile.
+//
+// Syllables are split on tone-number digit runs (which terminate a syllable)
+// and on any other non-word rune (space/hyphen/comma/parenthesis/etc., which
+// separates syllables without itself carrying a tone) — this also recovers
+// tones for entries where Wiktionary fuses adjacent syllables with no
+// separator at all, e.g. "aa1het6" (two syllables, no space between them).
 func ChineseToneify(dialect, rom string) string {
 	if dialect == "Mandarin" {
 		return mandarinToneify(rom)
 	}
 
 	digitMap := chineseDialectToneDigits[dialect]
-	var out strings.Builder
-	for _, token := range strings.FieldsFunc(rom, func(r rune) bool { return r == ' ' || r == '-' }) {
-		letters, digit := splitTrailingDigits(token)
-		clean := filterLetterMarks(letters)
+	var out, letters strings.Builder
+	flush := func(digit int) {
+		clean := letters.String()
+		letters.Reset()
 		if clean == "" {
-			continue
+			return
 		}
 		var tone string
 		if isCheckedCoda(clean) {
@@ -584,5 +581,32 @@ func ChineseToneify(dialect, rom string) string {
 		out.WriteString(clean)
 		out.WriteString(tone)
 	}
+
+	runes := []rune(rom)
+	for i := 0; i < len(runes); {
+		if r := runes[i]; IsWordChar(r) {
+			letters.WriteRune(r)
+			i++
+			continue
+		}
+		if _, ok := digitValue(runes[i]); ok {
+			n := 0
+			j := i
+			for j < len(runes) {
+				d, ok := digitValue(runes[j])
+				if !ok {
+					break
+				}
+				n = n*10 + d
+				j++
+			}
+			flush(n)
+			i = j
+			continue
+		}
+		flush(0)
+		i++
+	}
+	flush(0)
 	return out.String()
 }
