@@ -25,8 +25,8 @@ This is a personal educational project. Word data is from Wiktionary (CC BY-SA).
 ## Implementation Details
 
 - In general, letters with diacritics are normalized into their analogous non-diacritic version, i.e. 'á' and 'a' are treated as if they are equivalent.
-- Most languages average around 6 phonemes in non-technical vocabulary, so the default # of spaces for most languages is set to 6 (including English, in contrast to regular wordle). For languages with syllabaries (such as Japanese), the default is set to 3, since each character is typically two phonemes. Canjie is set to 4 and tonal languages are set to 8 by default.
-- Chinese is handled by using the romanization (+ Zhuyin for Mandarin in addition to Pinyin) for character counts, considering each dialect as if it's its own language. There is also a Canjie-based version for Chinese, if you want to play based on characters rather than pronunciation.
+- Most languages average around 6 phonemes in non-technical vocabulary, so the default # of spaces for most languages is set to 6 (including English, in contrast to regular wordle). For languages with syllabaries (such as Japanese), the default is set to 4, since each character is typically two phonemes. Canjie is set to 4 and tonal languages are set to 8 by default.
+- Chinese is handled by using the romanization (+ Zhuyin for Mandarin in addition to Pinyin) for character counts, considering each dialect as if it's its own language. There is also a Cangjie-based version for Chinese, if you want to play based on characters rather than pronunciation.
 - Chinese and Vietnamese tones are considered their own space. Chinese tones are categorized based on their Middle Chinese names (as this was the easiest middle-ground between dialects to implement).
 - Japanese is handled by converting all words to hiragana. Each mora == 1 space.
 - Brahmic scripts (Devanagari, Gujarati, Tamil, etc.) and other abugidas are handled by counting each unicode point as a seperate space (including combining diacritics for vowels).

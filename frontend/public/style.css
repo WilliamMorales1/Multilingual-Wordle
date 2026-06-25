@@ -290,7 +290,7 @@ header h1 {
     border-radius: 10px;
     padding: 28px 24px;
     width: min(420px, 92vw);
-    max-height: 96svh;
+    max-height: 74svh;
     overflow-y: auto;
 }
 #settingsModal .modal-box {

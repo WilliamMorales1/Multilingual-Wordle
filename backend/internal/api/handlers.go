@@ -1,4 +1,3 @@
-// Package api implements the HTTP handlers for the Wordgo game API.
 package api
 
 import (
@@ -61,9 +60,7 @@ func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]str
 	}
 }
 
-// HandleClearCache handles POST /api/cache/clear.
-// If game_id refers to a game still in progress, that game's word list is
-// kept cached so the current game isn't broken mid-play.
+// POST /api/cache/clear.
 func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		GameID uint `json:"game_id"`
@@ -84,7 +81,7 @@ func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"ok": true})
 }
 
-// HandleNewGame handles POST /api/game.
+// POST /api/game.
 func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Lang string `json:"lang"`
@@ -94,9 +91,6 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Lang == "" {
-		req.Lang = wordlist.DefaultLang
-	}
 	length := keyboard.DefaultLengthForLang(req.Lang)
 
 	words, err := wordlist.GetCachedWordList(req.Lang, length)
@@ -138,7 +132,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleGetGame handles GET /api/game/{id}.
+// GET /api/game/{id}.
 func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -186,7 +180,7 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, resp)
 }
 
-// HandleGuess handles POST /api/game/{id}/guess.
+// POST /api/game/{id}/guess.
 func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -311,7 +305,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, resp)
 }
 
-// HandleGetStats handles GET /api/stats?lang=English&length=5.
+// GET /api/stats?lang=X&length=Y.
 func HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	lng := r.URL.Query().Get("lang")
 	length, _ := strconv.Atoi(r.URL.Query().Get("length"))
@@ -373,7 +367,7 @@ func HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleGetLanguages handles GET /api/languages.
+// GET /api/languages.
 func HandleGetLanguages(w http.ResponseWriter, r *http.Request) {
 	langs := wordlist.GetCachedLanguages()
 	defaultLengths := make(map[string]int, len(langs))
@@ -383,7 +377,7 @@ func HandleGetLanguages(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"languages": langs, "default_lengths": defaultLengths})
 }
 
-// HandleGetProgress handles GET /api/progress?lang=X&length=Y.
+// GET /api/progress?lang=X&length=Y.
 func HandleGetProgress(w http.ResponseWriter, r *http.Request) {
 	lng := r.URL.Query().Get("lang")
 	length, _ := strconv.Atoi(r.URL.Query().Get("length"))

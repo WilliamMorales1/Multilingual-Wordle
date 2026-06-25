@@ -62,6 +62,7 @@ document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
   let allLangs: string[] = [];
   let activeIdx = -1;
   const unused = [
+    'Old Japanese',
     'Chinese',
     'Cantonese',
     'Hokkien',

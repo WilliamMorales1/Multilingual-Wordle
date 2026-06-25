@@ -1,6 +1,3 @@
-// Package lang implements script-aware word normalization: grapheme splitting,
-// accent-insensitive comparison, Hangul/Japanese handling, and Wordle-style guess
-// evaluation.
 package lang
 
 import (
@@ -12,16 +9,10 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// logographicThreshold caps alphabet size before BuildAlphabet gives up (CJK etc).
-const logographicThreshold = 200
-
-// Hangul syllable decomposition tables (compatibility jamo codepoints)
 var hangulChoseong = []rune{'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'}
 var hangulJungseong = []rune{'ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ'}
 var hangulJongseong = []rune{0, 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'}
 
-// DecomposeHangul converts precomposed syllable blocks (AC00–D7A3) into
-// compatibility jamo sequences. Other runes pass through unchanged.
 func DecomposeHangul(word string) string {
 	var buf strings.Builder
 	for _, r := range word {
@@ -49,7 +40,6 @@ func IsJapaneseLang(lang string) bool {
 	return slices.Contains([]string{"japanese", "ainu"}, strings.ToLower(lang))
 }
 
-// KatakanaToHiragana converts fullwidth katakana (U+30A1–U+30F6) to hiragana.
 func KatakanaToHiragana(word string) string {
 	var buf strings.Builder
 	for _, r := range word {
@@ -62,7 +52,6 @@ func KatakanaToHiragana(word string) string {
 	return buf.String()
 }
 
-// IsPureHiragana returns true when every rune is in the hiragana block U+3041–U+309F.
 func IsPureHiragana(word string) bool {
 	for _, r := range word {
 		if r < 0x3041 || r > 0x309F {
@@ -72,8 +61,6 @@ func IsPureHiragana(word string) bool {
 	return len(word) > 0
 }
 
-// jamoExpansion maps compound compatibility jamo to their two base components.
-// Covers doubled consonants, consonant clusters (jongseong), and compound vowels.
 var jamoExpansion = map[rune]string{
 	// Doubled consonants
 	'ㄲ': "ㄱㄱ", 'ㄸ': "ㄷㄷ", 'ㅃ': "ㅂㅂ", 'ㅆ': "ㅅㅅ", 'ㅉ': "ㅈㅈ",
@@ -87,7 +74,6 @@ var jamoExpansion = map[rune]string{
 	'ㅢ': "ㅡㅣ",
 }
 
-// ExpandJamo splits compound jamo into base components (second decomposition pass).
 func ExpandJamo(word string) string {
 	var buf strings.Builder
 	for _, r := range word {
@@ -100,7 +86,6 @@ func ExpandJamo(word string) string {
 	return buf.String()
 }
 
-// IsPureJamo returns true when every rune is a Korean compatibility jamo (U+3131–U+3163).
 func IsPureJamo(word string) bool {
 	for _, r := range word {
 		if r < 0x3131 || r > 0x3163 {
@@ -110,9 +95,6 @@ func IsPureJamo(word string) bool {
 	return len(word) > 0
 }
 
-// toneTranslationsByKind maps a tone-split language's combining tone marks to a
-// non-combining (spacing) glyph for that tone's tile. Vietnamese's vowel-quality
-// diacritics stay attached; only tone marks split off. Chinese: see ChineseToneify.
 var toneTranslationsByKind = map[string]map[rune]string{
 	"vietnamese": {
 		0x0300: "`",  // huyền (grave)        -> GRAVE ACCENT
@@ -222,8 +204,6 @@ func IsValid(word string, length int, toneLang string) bool {
 	return true
 }
 
-// normalizeKanaRune maps small kana to their full-size equivalents.
-// Dakuten/handakuten are handled by NFD stripping in NormalizeChar.
 func normalizeKanaRune(r rune) rune {
 	switch r {
 	case 'ぁ':
@@ -349,7 +329,6 @@ func NormalizeWord(word, toneLang string) string {
 	return b.String()
 }
 
-// BuildNormalizedSet maps accent-stripped forms back to one canonical original word.
 func BuildNormalizedSet(words map[string]string, toneLang string) map[string]string {
 	set := make(map[string]string, len(words))
 	for w := range words {
@@ -358,17 +337,12 @@ func BuildNormalizedSet(words map[string]string, toneLang string) map[string]str
 	return set
 }
 
-// BuildAlphabet collects unique grapheme clusters from the word list.
-// Returns nil for logographic scripts exceeding logographicThreshold.
 func BuildAlphabet(wordList map[string]string, toneLang string) []string {
 	charSet := make(map[string]bool)
 	for word := range wordList {
 		for _, ch := range WordChars(word, toneLang) {
 			charSet[ch] = true
 		}
-	}
-	if len(charSet) > logographicThreshold {
-		return nil
 	}
 	chars := make([]string, 0, len(charSet))
 	for ch := range charSet {
@@ -484,10 +458,7 @@ var chineseDialectToneDigits = map[string]map[int]string{
 	"Jin":       {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneRu},
 }
 
-// checkedCodaSuffixes are stop-consonant/glottal codas marking a syllable as
-// historically checked (入), overriding the tone-digit lookup — these dialects
-// reuse some tone numbers across checked/unchecked syllables, split by coda.
-var checkedCodaSuffixes = []string{"p", "t", "k", "h"}
+var checkedCodaSuffixes = []string{"p", "t", "k", "h", "q"} // "h" and "q" are used for the glottal stop in some dialects
 
 func isCheckedCoda(letters string) bool {
 	for _, suf := range checkedCodaSuffixes {
@@ -498,10 +469,6 @@ func isCheckedCoda(letters string) bool {
 	return false
 }
 
-// superscriptDigits maps Unicode superscript-numeral runes (U+00B9/00B2/00B3,
-// U+2074-2079) to their digit value — kaikki's Cantonese/Hokkien/etc. zh_pron
-// tone numbers are rendered as superscripts (e.g. "aa³ gwaa¹"), not plain
-// ASCII digits.
 var superscriptDigits = map[rune]int{
 	'⁰': 0, '¹': 1, '²': 2, '³': 3, '⁴': 4,
 	'⁵': 5, '⁶': 6, '⁷': 7, '⁸': 8, '⁹': 9,

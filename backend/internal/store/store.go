@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,20 +12,10 @@ import (
 
 var db *sql.DB
 
-// dataPath resolves name relative to DATA_DIR (or the working directory if unset).
-func dataPath(name string) string {
-	dir := os.Getenv("DATA_DIR")
-	if dir == "" {
-		dir = "."
-	}
-	return filepath.Join(dir, name)
-}
-
-// Init opens (and migrates) the SQLite database. It is fatal on failure since
-// the server can't run without persistence.
+// Init opens & migrates SQLite db. It is fatal on failure sincethe server can't run without persistence.
 func Init() {
 	var err error
-	db, err = sql.Open("sqlite", dataPath("wordgo.db"))
+	db, err = sql.Open("sqlite", "wordgo.db")
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}

@@ -11,7 +11,7 @@ import (
 	"wordgo/internal/lang"
 )
 
-// Key identifies a cached word list by language and word length.
+// Identifies a cached word list
 type Key struct {
 	Lang string
 	Len  int
@@ -19,7 +19,7 @@ type Key struct {
 
 type entry struct {
 	words      map[string]string // word→def
-	hanzi      map[string]string // romanized word→hanzi (Chinese dialects only)
+	hanzi      map[string]string // romanized word→hanzi (for Chinese dialects only)
 	etymology  map[string]string // word→etymology text
 	normalized map[string]string // normalizedWord→canonical
 	overflow   map[string]bool   // base→bool
@@ -35,12 +35,10 @@ var wlCache = &wordListStore{
 	entries: make(map[Key]*entry),
 }
 
-// DownloadProgress tracks in-flight word downloads: "lang:len" → count.
+// Tracks in-flight word downloads: "lang:len" → count.
 var DownloadProgress sync.Map
 
-// DailyAnswer picks one word per UTC calendar day for a given language/length,
-// deterministically from a hash of the date so every player sees the same
-// answer that day, like regular Wordle.
+// Picks one word per UTC calendar day by hashing language/length,
 func DailyAnswer(lng string, length int, words map[string]string) string {
 	keys := make([]string, 0, len(words))
 	for w := range words {
@@ -103,8 +101,7 @@ func GetCachedWordList(lng string, length int) (map[string]string, error) {
 	return words, nil
 }
 
-// GetCachedHanzi returns the romanized-word→hanzi map for a Chinese-dialect
-// word list, or nil if the language isn't a Chinese dialect or isn't cached yet.
+// nil if the language isn't a Chinese dialect or isn't cached yet.
 func GetCachedHanzi(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
@@ -114,7 +111,6 @@ func GetCachedHanzi(lng string, length int) map[string]string {
 	return nil
 }
 
-// GetCachedEtymology returns the word→etymology map for a word list, or nil if not cached yet.
 func GetCachedEtymology(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
@@ -124,7 +120,6 @@ func GetCachedEtymology(lng string, length int) map[string]string {
 	return nil
 }
 
-// GetWordListIfCached returns the cached word list without triggering a load.
 func GetWordListIfCached(lng string, length int) map[string]string {
 	wlCache.mu.RLock()
 	defer wlCache.mu.RUnlock()
@@ -157,8 +152,7 @@ var (
 	langCache   []string
 )
 
-// ClearWordListCache wipes the in-memory and on-disk word list cache. If keep
-// is non-zero, that entry's in-memory data is preserved so an in-progress
+// keep means that entry's in-memory data is preserved so an in-progress
 // game using it keeps working; its on-disk cache file is still removed since
 // it isn't needed again until the process restarts.
 func ClearWordListCache(keep Key) error {
@@ -176,7 +170,7 @@ func ClearWordListCache(keep Key) error {
 	langCache = nil
 	langCacheMu.Unlock()
 
-	return os.RemoveAll(dataPath("cache"))
+	return os.RemoveAll("cache")
 }
 
 func GetCachedLanguages() []string {

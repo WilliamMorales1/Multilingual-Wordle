@@ -1,5 +1,3 @@
-// Package keyboard derives on-screen keyboard layout, overflow, and
-// equivalence-grouping data from a language's alphabet.
 package keyboard
 
 import (
@@ -82,11 +80,11 @@ var keyboardLayouts = map[string][][]string{
 		{"พ", "ร", "น", "ย", "บ", "ล", "ข", "ช", "ต", "ค", "ม"},
 	},
 	"hiragana": {
-		{"わ", "ら", "や", "ま", "は", "な", "た", "さ", "か", "あ"},
-		{"ゐ", "り", "み", "ひ", "に", "ち", "し", "き", "い"},
-		{"ん", "る", "ゆ", "む", "ふ", "ぬ", "つ", "す", "く", "う"},
-		{"ゑ", "れ", "め", "へ", "ね", "て", "せ", "け", "え"},
-		{"を", "ろ", "よ", "も", "ほ", "の", "と", "そ", "こ", "お"},
+		{"や", "わ", "ら", "ま", "は", "な", "た", "さ", "か", "あ"},
+			  {"ゐ", "り", "み", "ひ", "に", "ち", "し", "き", "い"},
+		{"ゆ", "ん", "る", "む", "ふ", "ぬ", "つ", "す", "く", "う"},
+			  {"ゑ", "れ", "め", "へ", "ね", "て", "せ", "け", "え"},
+		{"よ", "を", "ろ", "も", "ほ", "の", "と", "そ", "こ", "お"},
 	},
 	"korean": {
 		{"ㅂ", "ㅈ", "ㄷ", "ㄱ", "ㅅ", "ㅛ", "ㅕ", "ㅑ", "ㅐ", "ㅔ"},
@@ -173,17 +171,11 @@ var keyboardLayouts = map[string][][]string{
 		{"z", "x", "c", "ü", "b", "n", "m"},
 		{lang.TonePing, lang.ToneShang, lang.ToneQu, lang.ToneRu}, // 平 上 去 入
 	},
-	// Cangjie's 24 root-glyph keys, laid out at the same qwerty physical
-	// positions a real Cangjie keyboard prints them at (A-Y, no X/Z). Each
-	// tile holds one root glyph of a character's code (1-5 glyphs per hanzi).
 	"cangjie": {
 		{"手", "田", "水", "口", "廿", "卜", "山", "戈", "人", "心"},
 		{"日", "尸", "木", "火", "土", "竹", "十", "大", "中"},
 		{"金", "女", "月", "弓", "一"},
 	},
-	// Standard 大千式 (Dachen) Zhuyin keyboard: initials/finals at their usual
-	// physical qwerty position, tone marks (2nd/3rd/4th/neutral) on their own
-	// row — 1st tone carries no mark, so it has no key (and no tile).
 	"zhuyin": {
 		{"ㄅ", "ㄉ", "ㄓ", "ㄚ", "ㄞ", "ㄢ", "ㄦ"},
 		{"ㄆ", "ㄊ", "ㄍ", "ㄐ", "ㄔ", "ㄗ", "ㄧ", "ㄛ", "ㄟ", "ㄣ"},
@@ -194,17 +186,13 @@ var keyboardLayouts = map[string][][]string{
 }
 
 func isSyllabary(keyboardLayout string) bool {
-	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "vietnamese", "cangjie"}
+	marked := []string{"hiragana", "geez", "syllabics", "cherokee", "cangjie"}
 	if slices.Contains(marked, keyboardLayout) {
 		return true
 	}
 	return false
 }
 
-// isTonal reports whether a layout splits tone marks into their own tiles
-// (Vietnamese diacritics, Chinese dialect tone-category hanzi), which makes
-// each "letter" of a normal-length word span more tiles than non-tonal
-// syllabaries — so it needs a longer default word length.
 func isTonal(keyboardLayout string) bool {
 	return keyboardLayout == "vietnamese" || keyboardLayout == "chinese"
 }
@@ -239,21 +227,17 @@ func resolveLayoutOverride(lng string) string {
 // otherwise.
 func DefaultLengthForLang(lng string) int {
 	name := resolveLayoutOverride(lng)
-	if name == "cangjie" {
+	if name == "cangjie" || isSyllabary(name) {
 		return 4
 	}
 	if isTonal(name) {
 		return 8
 	}
-	if name != "" && isSyllabary(name) {
-		return 3
-	}
 	return 6
 }
 
 // langLayoutMap overrides script-detection for languages whose alphabet is a
-// pure rearrangement of qwerty's 26 ASCII letters (azerty, qwertz, geez), since
-// detectLayout has no unique chars to key off. Keep small — others auto-detect fine.
+// pure rearrangement of qwerty's 26 ASCII letters (azerty, qwertz, geez)
 var langLayoutMap = map[string]string{
 	"English": "qwerty", "French": "azerty", "German": "qwertz",
 	"Amharic": "geez", "Tigrinya": "geez", "Japanese": "hiragana",

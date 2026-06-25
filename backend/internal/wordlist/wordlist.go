@@ -23,28 +23,15 @@ import (
 	"wordgo/internal/lang"
 )
 
-const (
-	DefaultLang   = "English"
-	DefaultLength = 6
-)
-
-// dataPath resolves name relative to DATA_DIR (or the working directory if unset).
-func dataPath(name string) string {
-	dir := os.Getenv("DATA_DIR")
-	if dir == "" {
-		dir = "."
-	}
-	return filepath.Join(dir, name)
-}
-
 type KaikkiEntry struct {
 	Word          string               `json:"word"`
 	Lang          string               `json:"lang"`
 	Pos           string               `json:"pos"`
 	Senses        []map[string]any     `json:"senses"`
-	Sounds        []KaikkiSound        `json:"sounds"`
+	Sounds        []KaikkiSound        `json:"sounds"` // for Chinese romanizations
 	Etymology     string               `json:"etymology_text"`
 	HeadTemplates []KaikkiHeadTemplate `json:"head_templates"`
+	Redirects     []string             `json:"redirects"`
 }
 
 // KaikkiHeadTemplate carries the "Han char" infobox template on Translingual
@@ -55,25 +42,18 @@ type KaikkiHeadTemplate struct {
 	Expansion string            `json:"expansion"`
 }
 
-// excludedSenseTags marks senses that identify a word as a proper noun,
-// given name, or surname rather than an ordinary dictionary word.
 var excludedSenseTags = map[string]bool{
 	"proper nouns":    true,
 	"given names":     true,
 	"surnames":        true,
-	"non-lemma forms": true,
 }
 
 // isExcludedEntry reports whether an entry should be skipped because it (or
 // all of its senses) is tagged as a proper noun, given name, or surname.
-// For Japanese and Ainu, "non-lemma forms" is not excluded — kana spellings
-// of kanji words (e.g. わたし, あした) are tagged non-lemma but are the only
-// form that passes IsPureHiragana, so excluding them would drop the word.
 func isExcludedEntry(entry KaikkiEntry) bool {
 	if strings.EqualFold(entry.Pos, "name") {
 		return true
 	}
-	allowNonLemma := lang.IsJapaneseLang(entry.Lang) || lang.IsHangulLang(entry.Lang)
 	for _, sense := range entry.Senses {
 		tags, ok := sense["tags"].([]any)
 		if !ok {
@@ -85,9 +65,6 @@ func isExcludedEntry(entry KaikkiEntry) bool {
 				continue
 			}
 			tag = strings.ToLower(tag)
-			if tag == "non-lemma forms" && allowNonLemma {
-				continue
-			}
 			if excludedSenseTags[tag] {
 				return true
 			}
@@ -101,7 +78,7 @@ type KaikkiSound struct {
 	Tags   []string `json:"tags"`
 }
 
-// chineseDialects lists topolects exposed as "Chinese (X)" pseudo-languages.
+// chineseDialects lists topolects exposed as "Chinese (X)" languages.
 // Each maps to the single kaikki.org "Chinese" dump, picking romanization by
 // matching this name against a sound entry's tags (e.g. "Cantonese", "Hokkien").
 var chineseDialects = []string{
@@ -109,21 +86,12 @@ var chineseDialects = []string{
 	"Min Bei", "Min Dong", "Gan", "Xiang", "Jin", "Cangjie", "Zhuyin",
 }
 
-// cangjieDialect names the pseudo-dialect whose "romanization" is each hanzi
-// character's Cangjie input code (looked up via cangjieTable) rather than a
-// spoken pronunciation pulled from a sound entry's zh_pron tags.
+// "romanization" = cangjie input code
 const cangjieDialect = "Cangjie"
 
-// zhuyinDialect names the pseudo-dialect whose "romanization" is Mandarin's
-// Zhuyin (Bopomofo) transcription, pulled from a sound entry tagged
-// "Bopomofo" rather than matched by dialect name like romanizeEntry does.
+// "romanization" = zhuyin transcription
 const zhuyinDialect = "Zhuyin"
 
-// zhuyinRomanize returns an entry's Mandarin Bopomofo reading (e.g. "ㄡ ㄎㄟˋ"),
-// or "" if absent. Tone marks (ˊˇˋ˙) are spacing modifier-letter runes, not
-// combining marks, so WordChars already splits them into their own tile
-// without any special tone-handling — only the syllable separators (spaces)
-// need stripping, done by zhuyinify.
 func zhuyinRomanize(entry KaikkiEntry) string {
 	for _, s := range entry.Sounds {
 		if s.ZhPron == "" {
@@ -145,14 +113,12 @@ func zhuyinRomanize(entry KaikkiEntry) string {
 	return ""
 }
 
-// zhuyinify strips the space/hyphen syllable separators from a Bopomofo
-// reading, concatenating its syllables (each already ending in its own tone
-// mark, or no mark for first tone) into one guessable string.
+// Strips the space/hyphen syllable separators and first tone space
 func zhuyinify(rom string) string {
 	return strings.Join(strings.FieldsFunc(rom, func(r rune) bool { return r == ' ' || r == '-' }), "")
 }
 
-// parseChineseDialect extracts the dialect name from a "Chinese (X)" pseudo-language.
+// Extracts the dialect name from a "Chinese (X)" pseudo-language.
 func parseChineseDialect(lng string) (string, bool) {
 	if !strings.HasPrefix(lng, "Chinese (") || !strings.HasSuffix(lng, ")") {
 		return "", false
@@ -164,8 +130,6 @@ func parseChineseDialect(lng string) (string, bool) {
 	return d, true
 }
 
-// romanizeEntry returns the romanization for the given dialect from an entry's
-// sounds list (e.g. Pinyin for Mandarin, Jyutping for Cantonese), or "" if absent.
 func romanizeEntry(entry KaikkiEntry, dialect string) string {
 	for _, s := range entry.Sounds {
 		if s.ZhPron == "" {
@@ -180,7 +144,6 @@ func romanizeEntry(entry KaikkiEntry, dialect string) string {
 	return ""
 }
 
-// kaikkiURL builds the per-language dump URL on kaikki.org.
 // Directory uses %20 for spaces; filename has spaces stripped entirely.
 func kaikkiURL(lng string) string {
 	slug := strings.ReplaceAll(lng, " ", "")
@@ -192,16 +155,11 @@ func kaikkiURL(lng string) string {
 	return u.String()
 }
 
-// cacheFilePath returns a cache file path for lng/length, creating the cache dir if needed.
+// cacheFilePath returns a cache file path for lng/length, creating dir if needed.
 func cacheFilePath(lng string, length int, suffix string) string {
 	safe := strings.ToLower(strings.ReplaceAll(lng, " ", "_"))
-	dir := dataPath("cache")
-	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, fmt.Sprintf("%s_%dl%s.json", safe, length, suffix))
-}
-
-func cachePath(lng string, length int) string {
-	return cacheFilePath(lng, length, "")
+	os.MkdirAll("cache", 0755)
+	return filepath.Join("cache", fmt.Sprintf("%s_%dl%s.json", safe, length, suffix))
 }
 
 func firstGloss(entry KaikkiEntry) string {
@@ -215,24 +173,42 @@ func firstGloss(entry KaikkiEntry) string {
 	return ""
 }
 
-// defSeparator joins multiple distinct definitions for the same word within
-// a single cached string entry — chosen because it can't appear in gloss
-// prose, unlike "; " or newline.
+// For Japanese hiragana redirects without direct glosses
+func formOfWord(entry KaikkiEntry) string {
+	if len(entry.Redirects) > 0 {
+		return entry.Redirects[0]
+	}
+	for _, sense := range entry.Senses {
+		formOf, ok := sense["form_of"].([]any)
+		if !ok {
+			continue
+		}
+		for _, f := range formOf {
+			fm, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			if w, ok := fm["word"].(string); ok && w != "" {
+				return w
+			}
+		}
+	}
+	return ""
+}
+
+// Joins definitions, chosen over \n or "; " because it doesn't appear in glosses
 const defSeparator = "\x1f"
 
-// maxDefs caps how many distinct definitions are kept per word; callers
-// display at most this many at game end.
+// Caps how many distinct definitions are shown
 const maxDefs = 3
 
-// SplitDefinitions splits a cached definition string back into its
-// individual glosses (as accumulated by addDef).
+// Split cached definition back to its glosses
 func SplitDefinitions(def string) []string {
 	return strings.Split(def, defSeparator)
 }
 
-// addDef appends gloss to the word's stored definition string if it's
-// non-empty, not a duplicate, and under maxDefs — used to accumulate
-// definitions from multiple dictionary entries/senses of the same word.
+// Appends gloss to the word's stored definition 
+// if non-empty && non-duplicate && under maxDefs
 func addDef(words map[string]string, word, gloss string) {
 	if gloss == "" {
 		return
@@ -249,24 +225,19 @@ func addDef(words map[string]string, word, gloss string) {
 	words[word] = existing + defSeparator + gloss
 }
 
-// cangjieTableCachePath caches the hanzi->Cangjie-code table, which is
-// independent of word length so it's only ever fetched once.
+// cangjieTableCachePath caches the hanzi->Cangjie-code table
 func cangjieTableCachePath() string {
-	dir := dataPath("cache")
-	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "cangjie_table.json")
+	os.MkdirAll("cache", 0755)
+	return filepath.Join("cache", "cangjie_table.json")
 }
 
-// cangjieGlossPattern catches "Cangjie input <glyphs> (<CODE>)" embedded in a
-// character entry's head-template expansion or gloss prose — <glyphs> is the
+// Catches "Cangjie input <glyphs> (<CODE>)" embedded in a
+// character entry's head-template expansion or gloss prose - <glyphs> is the
 // sequence of root characters (one per <CODE> letter) that the on-screen
 // Cangjie keyboard actually displays and that guesses are checked against.
 var cangjieGlossPattern = regexp.MustCompile(`Cangjie input (\S+) \(([A-Z]+)\)`)
 
-// cangjieLetterGlyphs is the fixed 24-key Cangjie root-letter assignment
-// (A-Y, no X — see https://en.wikipedia.org/wiki/Cangjie_input_method),
-// used only as a fallback when an entry's "canj" arg has no parseable
-// expansion/gloss text to pull the root glyphs from directly.
+// see https://en.wikipedia.org/wiki/Cangjie_input_method)
 var cangjieLetterGlyphs = map[byte]string{
 	'A': "日", 'B': "月", 'C': "金", 'D': "木", 'E': "水", 'F': "火", 'G': "土",
 	'H': "竹", 'I': "戈", 'J': "十", 'K': "大", 'L': "中", 'M': "一", 'N': "弓",
@@ -274,8 +245,7 @@ var cangjieLetterGlyphs = map[byte]string{
 	'V': "女", 'W': "田", 'X': "難", 'Y': "卜",
 }
 
-// cangjieGlyphsFromCode converts an ASCII-letter Cangjie code (e.g. "VND")
-// into its root-glyph form (e.g. "女弓木") via cangjieLetterGlyphs.
+// ASCII codes to Cangjie root-glyph codes
 func cangjieGlyphsFromCode(code string) string {
 	var b strings.Builder
 	for i := 0; i < len(code); i++ {
@@ -417,7 +387,13 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	}
 	defer gz.Close()
 
-	type result struct{ word, def, hanzi, etymology string }
+	// kanjiDef marks side-table entries: kanji lemma defs keyed by kana reading.
+	type result struct {
+		word, def, hanzi, etymology string
+		kanjiDef                     bool
+	}
+
+	isJP := lang.IsJapaneseLang(lng)
 
 	numWorkers := runtime.NumCPU()
 	lines := make(chan []byte, numWorkers*8)
@@ -468,9 +444,26 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 						if !lang.IsPureJamo(word) {
 							continue
 						}
-					} else if lang.IsJapaneseLang(lng) {
+					} else if isJP {
 						word = lang.KatakanaToHiragana(word)
 						if !lang.IsPureHiragana(word) {
+							// Not a playable kana word, but may be a kanji lemma whose
+							// kana reading matches a word in the list. Key the side-table
+							// by the kana reading (from head_templates[0].args["1"]) so
+							// that 辛い(からい)="spicy" and 辛い(つらい)="painful" are kept
+							// separately and looked up by the exact hiragana form.
+							if gloss := firstGloss(entry); gloss != "" {
+								reading := ""
+								if len(entry.HeadTemplates) > 0 {
+									r := lang.KatakanaToHiragana(strings.ToLower(entry.HeadTemplates[0].Args["1"]))
+									if lang.IsPureHiragana(r) {
+										reading = r
+									}
+								}
+								if reading != "" {
+									results <- result{word: reading, def: gloss, kanjiDef: true}
+								}
+							}
 							continue
 						}
 					} else if strings.EqualFold(lng, "Cherokee") {
@@ -483,7 +476,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 				if !lang.IsValid(word, length, toneLang) {
 					continue
 				}
-				results <- result{word, firstGloss(entry), hanzi, entry.Etymology}
+				results <- result{word: word, def: firstGloss(entry), hanzi: hanzi, etymology: entry.Etymology}
 			}
 		})
 	}
@@ -512,7 +505,16 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	if dialect != "" {
 		hanziMap = make(map[string]string)
 	}
+	// kanjiDefs maps kana reading → definition for kanji entries, keyed by reading
+	// so that homograph kanji (e.g. 辛い read as からい vs つらい) stay separate.
+	kanjiDefs := make(map[string]string)
 	for r := range results {
+		if r.kanjiDef {
+			if _, exists := kanjiDefs[r.word]; !exists {
+				kanjiDefs[r.word] = r.def
+			}
+			continue
+		}
 		_, existed := words[r.word]
 		if !existed {
 			words[r.word] = ""
@@ -530,6 +532,15 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 			log.Printf("  %d words collected...", len(words))
 			if onProgress != nil {
 				onProgress(len(words))
+			}
+		}
+	}
+	// Fill in definitions for Japanese kana words that had no gloss of their own
+	// by looking up the kanji lemma's definition keyed by this exact kana reading.
+	for w := range words {
+		if words[w] == "" {
+			if def, ok := kanjiDefs[w]; ok {
+				addDef(words, w, def)
 			}
 		}
 	}
@@ -555,7 +566,7 @@ func etymologyCachePath(lng string, length int) string {
 }
 
 func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, error) {
-	cf := cachePath(lng, length)
+	cf := cacheFilePath(lng, length, "")
 	hcf := hanziCachePath(lng, length)
 	ecf := etymologyCachePath(lng, length)
 
