@@ -1,5 +1,3 @@
-// Package wordlist fetches, caches, and serves per-language word lists
-// sourced from kaikki.org wiktextract dumps.
 package wordlist
 
 import (
@@ -35,7 +33,7 @@ type KaikkiEntry struct {
 }
 
 // KaikkiHeadTemplate carries the "Han char" infobox template on Translingual
-// character entries — Expansion's prose embeds the Cangjie root-glyph code
+// character entries - Expansion's prose embeds the Cangjie root-glyph code
 // (e.g. "...Cangjie input 女弓木 (VND)..."), Args["canj"] its ASCII-letter form.
 type KaikkiHeadTemplate struct {
 	Args      map[string]string `json:"args"`
@@ -43,9 +41,9 @@ type KaikkiHeadTemplate struct {
 }
 
 var excludedSenseTags = map[string]bool{
-	"proper nouns":    true,
-	"given names":     true,
-	"surnames":        true,
+	"proper nouns": true,
+	"given names":  true,
+	"surnames":     true,
 }
 
 // isExcludedEntry reports whether an entry should be skipped because it (or
@@ -207,7 +205,7 @@ func SplitDefinitions(def string) []string {
 	return strings.Split(def, defSeparator)
 }
 
-// Appends gloss to the word's stored definition 
+// Appends gloss to the word's stored definition
 // if non-empty && non-duplicate && under maxDefs
 func addDef(words map[string]string, word, gloss string) {
 	if gloss == "" {
@@ -259,7 +257,7 @@ func cangjieGlyphsFromCode(code string) string {
 }
 
 // cangjieCodeFromEntry extracts a character entry's Cangjie code as root
-// glyphs, preferring the head-template/gloss prose (authoritative — kaikki's
+// glyphs, preferring the head-template/gloss prose (authoritative - kaikki's
 // glyph rendering occasionally diverges from the textbook letter assignment)
 // and falling back to converting the structured "canj" arg via the static
 // letter table.
@@ -353,11 +351,7 @@ func loadCangjieTable() (map[string]string, error) {
 	return table, nil
 }
 
-// cangjieWord looks up a single hanzi character's root-glyph Cangjie code.
-// Cangjie listings are single-character only — codes for different
-// characters span 1-5 tiles, so "word" here is always one hanzi, never a
-// multi-character dictionary word.
-func cangjieWord(hanzi string, table map[string]string) string {
+func cangjieToChar(hanzi string, table map[string]string) string {
 	if len([]rune(hanzi)) != 1 {
 		return ""
 	}
@@ -368,7 +362,6 @@ func cangjieWord(hanzi string, table map[string]string) string {
 	return code
 }
 
-// streamURL downloads and parses a gzipped JSONL word dump from kaikki.org.
 // Parsing is parallelised across CPU workers while the scanner streams the download.
 func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
 	resp, err := http.Get(rawURL)
@@ -390,7 +383,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	// kanjiDef marks side-table entries: kanji lemma defs keyed by kana reading.
 	type result struct {
 		word, def, hanzi, etymology string
-		kanjiDef                     bool
+		kanjiDef                    bool
 	}
 
 	isJP := lang.IsJapaneseLang(lng)
@@ -412,7 +405,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 				}
 				var word, hanzi string
 				if dialect == cangjieDialect {
-					word = cangjieWord(entry.Word, cangjieTable)
+					word = cangjieToChar(entry.Word, cangjieTable)
 					if word == "" {
 						continue
 					}
@@ -449,9 +442,9 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 						if !lang.IsPureHiragana(word) {
 							// Not a playable kana word, but may be a kanji lemma whose
 							// kana reading matches a word in the list. Key the side-table
-							// by the kana reading (from head_templates[0].args["1"]) so
-							// that 辛い(からい)="spicy" and 辛い(つらい)="painful" are kept
-							// separately and looked up by the exact hiragana form.
+							// by the kana reading (from head_templates[0].args["1"])
+							// This is so, for example, 辛い(からい)="spicy" and 辛い(つらい)="painful" 
+							// are kept separately and looked up by the exact hiragana form.
 							if gloss := firstGloss(entry); gloss != "" {
 								reading := ""
 								if len(entry.HeadTemplates) > 0 {
@@ -461,14 +454,18 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 									}
 								}
 								if reading != "" {
-									results <- result{word: reading, def: gloss, kanjiDef: true}
+									results <- result{
+										word:     reading,
+										def:      gloss,
+										kanjiDef: true,
+									}
 								}
 							}
 							continue
 						}
 					} else if strings.EqualFold(lng, "Cherokee") {
 						// Cherokee's lower-case block (Unicode 8 Cherokee
-						// Supplement) isn't real orthography — everyday text
+						// Supplement) isn't real orthography - everyday text
 						// and the keyboard layout both use upper-case only.
 						word = entry.Word
 					}
@@ -476,7 +473,12 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 				if !lang.IsValid(word, length, toneLang) {
 					continue
 				}
-				results <- result{word: word, def: firstGloss(entry), hanzi: hanzi, etymology: entry.Etymology}
+				results <- result{
+					word:      word,
+					def:       firstGloss(entry),
+					hanzi:     hanzi,
+					etymology: entry.Etymology,
+				}
 			}
 		})
 	}
@@ -505,7 +507,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	if dialect != "" {
 		hanziMap = make(map[string]string)
 	}
-	// kanjiDefs maps kana reading → definition for kanji entries, keyed by reading
+	// kanjiDefs maps kana reading -> definition for kanji entries, keyed by reading
 	// so that homograph kanji (e.g. 辛い read as からい vs つらい) stay separate.
 	kanjiDefs := make(map[string]string)
 	for r := range results {
@@ -547,7 +549,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 
 	if scanErr != nil {
 		if len(words) >= 20 {
-			log.Printf("Warning: scanner error after %d words (%v) — using partial results", len(words), scanErr)
+			log.Printf("Warning: scanner error after %d words (%v) - using partial results", len(words), scanErr)
 			return words, hanziMap, etymology, nil
 		}
 		return nil, nil, nil, scanErr
@@ -555,20 +557,10 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	return words, hanziMap, etymology, nil
 }
 
-// hanziCachePath returns the sidecar cache path holding hanzi for a Chinese-dialect word list.
-func hanziCachePath(lng string, length int) string {
-	return cacheFilePath(lng, length, "_hanzi")
-}
-
-// etymologyCachePath returns the sidecar cache path holding etymology text for a word list.
-func etymologyCachePath(lng string, length int) string {
-	return cacheFilePath(lng, length, "_etymology")
-}
-
 func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, error) {
 	cf := cacheFilePath(lng, length, "")
-	hcf := hanziCachePath(lng, length)
-	ecf := etymologyCachePath(lng, length)
+	hcf := cacheFilePath(lng, length, "_hanzi")
+	ecf := cacheFilePath(lng, length, "_etymology")
 
 	if data, err := os.ReadFile(cf); err == nil {
 		var cached map[string]string
@@ -614,7 +606,7 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 	DownloadProgress.Delete(key)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org — check /api/languages for valid names", lng)
+			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org - check /api/languages for valid names", lng)
 		}
 		return nil, nil, nil, err
 	}
@@ -646,7 +638,6 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 	return words, hanzi, etymology, nil
 }
 
-// getLanguages scrapes available language names from kaikki.org.
 func getLanguages() map[string]string {
 	resp, err := http.Get("https://kaikki.org/dictionary/index.html")
 	if err != nil {
