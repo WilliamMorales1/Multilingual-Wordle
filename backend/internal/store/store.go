@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,8 +16,13 @@ var db *sql.DB
 
 // Init opens & migrates SQLite db. It is fatal on failure sincethe server can't run without persistence.
 func Init() {
+	dbPath := "wordgo.db"
+	if dir := os.Getenv("DATA_DIR"); dir != "" {
+		dbPath = filepath.Join(dir, "wordgo.db")
+	}
+
 	var err error
-	db, err = sql.Open("sqlite", "wordgo.db")
+	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
@@ -25,7 +32,7 @@ func Init() {
 	if err := createTables(); err != nil {
 		log.Fatal("Failed to create tables:", err)
 	}
-	log.Println("Database ready (wordgo.db)")
+	log.Println("Database ready", "path", dbPath)
 }
 
 func createTables() error {
@@ -36,7 +43,8 @@ func createTables() error {
 			lang        TEXT NOT NULL,
 			word_length INTEGER NOT NULL,
 			answer      TEXT NOT NULL,
-			status      TEXT NOT NULL DEFAULT 'playing'
+			status      TEXT NOT NULL DEFAULT 'playing',
+			max_guesses INTEGER NOT NULL DEFAULT 6
 		);
 		CREATE TABLE IF NOT EXISTS guess_records (
 			id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +60,7 @@ func createTables() error {
 
 func CreateGame(g *Game) error {
 	res, err := db.Exec(
-		`INSERT INTO games (lang, word_length, answer, status) VALUES (?, ?, ?, ?)`,
+		`INSERT INTO games (lang, word_length, answer, status, max_guesses) VALUES (?, ?, ?, ?, 6)`,
 		g.Lang, g.WordLength, g.Answer, g.Status,
 	)
 	if err != nil {

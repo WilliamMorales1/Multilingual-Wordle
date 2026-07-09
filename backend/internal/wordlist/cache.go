@@ -170,7 +170,7 @@ func ClearWordListCache(keep Key) error {
 	langCache = nil
 	langCacheMu.Unlock()
 
-	return os.RemoveAll("cache")
+	return os.RemoveAll(cacheDir())
 }
 
 func GetCachedLanguages() []string {

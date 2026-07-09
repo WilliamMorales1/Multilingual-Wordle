@@ -153,11 +153,20 @@ func kaikkiURL(lng string) string {
 	return u.String()
 }
 
+// cacheDir returns the directory used for on-disk caches, under DATA_DIR if set.
+func cacheDir() string {
+	dir := "cache"
+	if d := os.Getenv("DATA_DIR"); d != "" {
+		dir = filepath.Join(d, "cache")
+	}
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
 // cacheFilePath returns a cache file path for lng/length, creating dir if needed.
 func cacheFilePath(lng string, length int, suffix string) string {
 	safe := strings.ToLower(strings.ReplaceAll(lng, " ", "_"))
-	os.MkdirAll("cache", 0755)
-	return filepath.Join("cache", fmt.Sprintf("%s_%dl%s.json", safe, length, suffix))
+	return filepath.Join(cacheDir(), fmt.Sprintf("%s_%dl%s.json", safe, length, suffix))
 }
 
 func firstGloss(entry KaikkiEntry) string {
@@ -225,8 +234,7 @@ func addDef(words map[string]string, word, gloss string) {
 
 // cangjieTableCachePath caches the hanzi->Cangjie-code table
 func cangjieTableCachePath() string {
-	os.MkdirAll("cache", 0755)
-	return filepath.Join("cache", "cangjie_table.json")
+	return filepath.Join(cacheDir(), "cangjie_table.json")
 }
 
 // Catches "Cangjie input <glyphs> (<CODE>)" embedded in a
