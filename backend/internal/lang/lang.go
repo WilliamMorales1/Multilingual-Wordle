@@ -3,6 +3,7 @@ package lang
 import (
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -352,10 +353,14 @@ func BuildAlphabet(wordList map[string]string, toneLang string) []string {
 	return chars
 }
 
-// MatchWildcard finds the first canonical word whose grapheme clusters match
-// guessChars, treating "*" as matching any char whose base is in overflowBaseSet.
+// MatchWildcard finds the lexicographically smallest canonical word whose
+// grapheme clusters match guessChars, treating "*" as matching any char
+// whose base is in overflowBaseSet. Picking deterministically (rather than
+// the first hit from Go's randomized map iteration) means the same wildcard
+// guess always resolves to the same word.
 func MatchWildcard(guessChars []string, normSet map[string]string, overflowBaseSet map[string]bool, toneLang string) string {
 	n := len(guessChars)
+	best := ""
 	for _, canonical := range normSet {
 		cChars := WordChars(canonical, toneLang)
 		if len(cChars) != n {
@@ -375,11 +380,11 @@ func MatchWildcard(guessChars []string, normSet map[string]string, overflowBaseS
 				break
 			}
 		}
-		if match {
-			return canonical
+		if match && (best == "" || canonical < best) {
+			best = canonical
 		}
 	}
-	return ""
+	return best
 }
 
 // Evaluate returns per-character states ("correct"/"present"/"absent") for a guess.
@@ -421,52 +426,14 @@ func Evaluate(guessChars, answerChars []string) []string {
 	return states
 }
 
-// The four traditional Middle Chinese tone categories — see
-// https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese). Each dialect's
-// romanized syllable gets one folded in as its own trailing tile.
-const (
-	TonePing  = "平" // level
-	ToneShang = "上" // rising
-	ToneQu    = "去" // departing
-	ToneRu    = "入" // entering (checked, historically ended in -p/-t/-k)
-)
-
 // mandarinToneMarks maps Wiktionary pinyin's NFD combining marks (macron/
-// acute/caron/grave) to a tone category. Pinyin tones 1/2 are both 平;
-// tone 3 is 上; tone 4 covers 去 plus the (Mandarin-merged) 入 syllables.
+// acute/caron/grave) to their conventional pinyin tone number (1-4), per
+// https://en.wikipedia.org/wiki/Pinyin#Tone_marks.
 var mandarinToneMarks = map[rune]string{
-	0x0304: TonePing,
-	0x0301: TonePing,
-	0x030C: ToneShang,
-	0x0300: ToneQu,
-}
-
-// chineseDialectToneDigits maps each dialect's tone-number scheme to a tone
-// category for *non-checked* syllables — an approximation, since true Middle
-// Chinese class depends on initial voicing romanizations drop (see isCheckedCoda).
-var chineseDialectToneDigits = map[string]map[int]string{
-	"Mandarin":  {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu},
-	"Cantonese": {1: TonePing, 2: ToneShang, 3: ToneQu, 4: TonePing, 5: ToneShang, 6: ToneQu},
-	"Hokkien":   {1: TonePing, 2: ToneShang, 3: ToneQu, 4: ToneRu, 5: TonePing, 6: ToneShang, 7: ToneQu, 8: ToneRu},
-	"Teochew":   {1: TonePing, 2: ToneShang, 3: ToneQu, 4: ToneRu, 5: TonePing, 6: ToneShang, 7: ToneQu, 8: ToneRu},
-	"Hakka":     {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneRu, 6: ToneQu, 7: ToneRu},
-	"Wu":        {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneRu},
-	"Min Bei":   {1: TonePing, 2: ToneShang, 3: ToneQu, 4: ToneRu, 5: TonePing, 6: ToneShang, 7: ToneQu, 8: ToneRu},
-	"Min Dong":  {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneQu, 6: ToneQu, 7: ToneRu},
-	"Gan":       {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneQu, 6: ToneRu, 7: ToneRu},
-	"Xiang":     {1: TonePing, 2: ToneShang, 3: ToneQu, 4: TonePing, 5: ToneShang, 6: ToneQu},
-	"Jin":       {1: TonePing, 2: TonePing, 3: ToneShang, 4: ToneQu, 5: ToneRu},
-}
-
-var checkedCodaSuffixes = []string{"p", "t", "k", "h", "q"} // "h" and "q" are used for the glottal stop in some dialects
-
-func isCheckedCoda(letters string) bool {
-	for _, suf := range checkedCodaSuffixes {
-		if strings.HasSuffix(letters, suf) {
-			return true
-		}
-	}
-	return false
+	0x0304: "1", // macron  (ā) - tone 1, flat
+	0x0301: "2", // acute   (á) - tone 2, rising
+	0x030C: "3", // caron   (ǎ) - tone 3, dipping
+	0x0300: "4", // grave   (à) - tone 4, falling
 }
 
 var superscriptDigits = map[rune]int{
@@ -484,9 +451,10 @@ func digitValue(r rune) (int, bool) {
 	return 0, false
 }
 
-// mandarinToneify folds pinyin's diacritic tone marks into trailing 平/上/去
-// tiles char by char — Wiktionary's readings are often concatenated without
-// syllable separators, so unlike other dialects this can't split on hyphens.
+// mandarinToneify folds pinyin's diacritic tone marks into trailing numeral
+// tiles (1-4, conventional pinyin tone-number notation) char by char —
+// Wiktionary's readings are often concatenated without syllable separators,
+// so unlike other dialects this can't split on hyphens.
 func mandarinToneify(rom string) string {
 	normalized := norm.NFD.String(rom)
 	runes := []rune(normalized)
@@ -518,20 +486,22 @@ func mandarinToneify(rom string) string {
 }
 
 // ChineseToneify converts a dialect's raw romanization into a guessable word
-// where each syllable's tone is folded into one of the four tone-category
-// hanzi (TonePing/ToneShang/ToneQu/ToneRu), appended as its own tile.
+// where each syllable's tone number is kept as its own trailing numeral
+// tile, using that dialect's own conventional tone-number notation (e.g.
+// Jyutping 1-6, POJ/Tâi-lô 1-8) rather than collapsing distinct tones into a
+// shared category.
 //
-// Syllables are split on tone-number digit runs (which terminate a syllable)
-// and on any other non-word rune (space/hyphen/comma/parenthesis/etc., which
-// separates syllables without itself carrying a tone) — this also recovers
-// tones for entries where Wiktionary fuses adjacent syllables with no
-// separator at all, e.g. "aa1het6" (two syllables, no space between them).
+// Syllables are split on tone-number digit runs (which terminate a syllable
+// and become its tile) and on any other non-word rune (space/hyphen/comma/
+// parenthesis/etc., which separates syllables without itself carrying a
+// tone) — this also recovers tones for entries where Wiktionary fuses
+// adjacent syllables with no separator at all, e.g. "aa1het6" (two
+// syllables, no space between them).
 func ChineseToneify(dialect, rom string) string {
 	if dialect == "Mandarin" {
 		return mandarinToneify(rom)
 	}
 
-	digitMap := chineseDialectToneDigits[dialect]
 	var out, letters strings.Builder
 	flush := func(digit int) {
 		clean := letters.String()
@@ -539,14 +509,10 @@ func ChineseToneify(dialect, rom string) string {
 		if clean == "" {
 			return
 		}
-		var tone string
-		if isCheckedCoda(clean) {
-			tone = ToneRu
-		} else if digit > 0 {
-			tone = digitMap[digit]
-		}
 		out.WriteString(clean)
-		out.WriteString(tone)
+		if digit > 0 {
+			out.WriteString(strconv.Itoa(digit))
+		}
 	}
 
 	runes := []rune(rom)

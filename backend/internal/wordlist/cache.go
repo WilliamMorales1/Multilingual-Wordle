@@ -28,12 +28,19 @@ type entry struct {
 type wordListStore struct {
 	mu      sync.RWMutex
 	entries map[Key]*entry
+	order   []Key // insertion order, oldest first — FIFO eviction once over cap
 	loadMu  sync.Mutex
 }
 
 var wlCache = &wordListStore{
 	entries: make(map[Key]*entry),
 }
+
+// maxCachedWordLists bounds in-memory growth: each entry holds a full word
+// list (plus definitions/hanzi/etymology) for one lang/length pair, kept
+// forever otherwise. A simple FIFO cap is good enough here — this isn't a
+// hot enough path to justify true LRU bookkeeping.
+const maxCachedWordLists = 50
 
 // Tracks in-flight word downloads: "lang:len" → count.
 var DownloadProgress sync.Map
@@ -96,6 +103,12 @@ func GetCachedWordList(lng string, length int) (map[string]string, error) {
 		normalized: normalized,
 		overflow:   overflowSet,
 	}
+	wlCache.order = append(wlCache.order, key)
+	if len(wlCache.order) > maxCachedWordLists {
+		oldest := wlCache.order[0]
+		wlCache.order = wlCache.order[1:]
+		delete(wlCache.entries, oldest)
+	}
 	wlCache.mu.Unlock()
 
 	return words, nil
@@ -152,25 +165,32 @@ var (
 	langCache   []string
 )
 
-// keep means that entry's in-memory data is preserved so an in-progress
-// game using it keeps working; its on-disk cache file is still removed since
-// it isn't needed again until the process restarts.
-func ClearWordListCache(keep Key) error {
+// ClearWordListCache evicts a single lang/length's cached word list, both in
+// memory and its on-disk JSON files, so a stale or corrupted entry can be
+// force-refreshed without disturbing every other player's cache — this used
+// to wipe the entire shared cache, which meant one client force-clearing
+// their own stale list nuked everyone else's mid-game.
+func ClearWordListCache(key Key) error {
+	if key == (Key{}) {
+		return nil
+	}
+
 	wlCache.mu.Lock()
-	newEntries := make(map[Key]*entry)
-	if keep != (Key{}) {
-		if e, ok := wlCache.entries[keep]; ok {
-			newEntries[keep] = e
+	delete(wlCache.entries, key)
+	for i, k := range wlCache.order {
+		if k == key {
+			wlCache.order = append(wlCache.order[:i], wlCache.order[i+1:]...)
+			break
 		}
 	}
-	wlCache.entries = newEntries
 	wlCache.mu.Unlock()
 
-	langCacheMu.Lock()
-	langCache = nil
-	langCacheMu.Unlock()
-
-	return os.RemoveAll(cacheDir())
+	for _, suffix := range []string{"", "_hanzi", "_etymology"} {
+		if err := os.Remove(cacheFilePath(key.Lang, key.Len, suffix)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func GetCachedLanguages() []string {

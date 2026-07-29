@@ -11,6 +11,7 @@ export interface GameResult {
   equivalences: string[][];
   rtl: boolean;
   matra_map?: Record<string, string> | null;
+  key_states?: Record<string, string>;
   answer?: string;
   answer_chars?: string;
   definitions?: string[];
@@ -22,6 +23,7 @@ export interface GuessRecord {
   attempt: number;
   word: string;
   chars?: string;
+  tiles?: string[];
   states: string[];
 }
 
@@ -29,9 +31,12 @@ export interface GuessResult {
   attempt: number;
   word: string;
   chars?: string;
+  tiles?: string[];
   states: string[];
   status: string;
   in_word_list: boolean;
+  key_states?: Record<string, string>;
+  message?: string;
   answer?: string;
   answer_chars?: string;
   definitions?: string[];

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -29,19 +30,61 @@ type guessResp struct {
 	Attempt int      `json:"attempt"`
 	Word    string   `json:"word"`
 	Chars   string   `json:"chars,omitempty"`
+	Tiles   []string `json:"tiles"`
 	States  []string `json:"states"`
 }
 
-func parseGuesses(records []store.GuessRecord, hanzi map[string]string) []guessResp {
+func parseGuesses(records []store.GuessRecord, hanzi map[string]string, toneLang string) []guessResp {
 	out := make([]guessResp, 0, len(records))
 	for _, r := range records {
 		var states []string
 		if err := json.Unmarshal([]byte(r.States), &states); err != nil {
 			slog.Error("corrupt guess states", "game_id", r.GameID, "attempt", r.Attempt, "error", err)
 		}
-		out = append(out, guessResp{Attempt: r.Attempt, Word: r.Word, Chars: hanzi[r.Word], States: states})
+		out = append(out, guessResp{Attempt: r.Attempt, Word: r.Word, Chars: hanzi[r.Word], Tiles: lang.WordChars(r.Word, toneLang), States: states})
 	}
 	return out
+}
+
+// stateRank orders letter states so a keyboard key shows its best-known
+// state once a letter has appeared in more than one guess.
+var stateRank = map[string]int{"correct": 3, "present": 2, "absent": 1}
+
+// aggregateKeyStates merges every guessed letter's best-known state across
+// all of a game's guesses, keyed by lang.NormalizeChar (accent/kana/case
+// insensitive) — computed once here so every client (web, TUI, ...) can
+// color an on-screen keyboard without re-deriving this merge itself.
+func aggregateKeyStates(records []guessResp, toneLang string) map[string]string {
+	out := make(map[string]string)
+	for _, r := range records {
+		chars := lang.WordChars(r.Word, toneLang)
+		for i, ch := range chars {
+			if i >= len(r.States) {
+				break
+			}
+			key := lang.NormalizeChar(ch)
+			if stateRank[r.States[i]] > stateRank[out[key]] {
+				out[key] = r.States[i]
+			}
+		}
+	}
+	return out
+}
+
+// winMessages are the exclamations shown on a won game, indexed by attempt
+// number (1st guess -> index 0). Kept server-side so every client shares the
+// same copy instead of each hardcoding it.
+var winMessages = []string{"Genius!", "Magnificent!", "Impressive!", "Splendid!", "Great!", "Phew!"}
+
+func winMessage(attempt int) string {
+	idx := attempt - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(winMessages) {
+		idx = len(winMessages) - 1
+	}
+	return winMessages[idx]
 }
 
 // addAnswerReveal fills in answer/definition/chars/etymology once a game is won.
@@ -60,21 +103,34 @@ func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]str
 	}
 }
 
-// POST /api/cache/clear.
+// POST /api/cache/clear. Scoped to a single lang/length so one client
+// force-refreshing a stale word list can't wipe every other player's cache.
 func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		GameID uint `json:"game_id"`
+		GameID uint   `json:"game_id"`
+		Lang   string `json:"lang"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	var keep wordlist.Key
+	var key wordlist.Key
 	if req.GameID != 0 {
-		if game, err := store.GetGame(req.GameID); err == nil && game.Status == "playing" {
-			keep = wordlist.Key{Lang: game.Lang, Len: game.WordLength}
+		game, err := store.GetGame(req.GameID)
+		if err != nil {
+			jsonErr(w, "game not found", http.StatusNotFound)
+			return
 		}
+		key = wordlist.Key{Lang: game.Lang, Len: game.WordLength}
+	} else if lng := strings.TrimSpace(req.Lang); lng != "" {
+		key = wordlist.Key{Lang: lng, Len: keyboard.DefaultLengthForLang(lng)}
+	} else {
+		jsonErr(w, "game_id or lang is required", http.StatusBadRequest)
+		return
 	}
 
-	if err := wordlist.ClearWordListCache(keep); err != nil {
+	if err := wordlist.ClearWordListCache(key); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -88,6 +144,12 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Lang = strings.TrimSpace(req.Lang)
+
+	if !slices.Contains(wordlist.GetCachedLanguages(), req.Lang) {
+		jsonErr(w, fmt.Sprintf("unknown language %q - check /api/languages for valid names", req.Lang), http.StatusBadRequest)
 		return
 	}
 
@@ -129,6 +191,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		"equivalences":    equivalences,
 		"rtl":             rtl,
 		"matra_map":       matraMap,
+		"key_states":      map[string]string{},
 	})
 }
 
@@ -153,18 +216,20 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	var rtl bool
 	var matraMap map[string]string
 	var layoutName string
+	toneLang := lang.ToneSplitKind(game.Lang)
 	if words := wordlist.GetWordListIfCached(game.Lang, game.WordLength); words != nil {
-		alphabet = lang.BuildAlphabet(words, lang.ToneSplitKind(game.Lang))
+		alphabet = lang.BuildAlphabet(words, toneLang)
 		keyboardRows, overflowBases, equivalences, rtl, matraMap, layoutName = keyboard.BuildGameExtras(alphabet, game.Lang, words)
 	}
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
+	guesses := parseGuesses(game.Guesses, hanzi, toneLang)
 	resp := map[string]any{
 		"id":              game.ID,
 		"lang":            game.Lang,
 		"word_length":     game.WordLength,
 		"status":          game.Status,
-		"guesses":         parseGuesses(game.Guesses, hanzi),
+		"guesses":         guesses,
 		"alphabet":        alphabet,
 		"keyboard_rows":   keyboardRows,
 		"keyboard_layout": layoutName,
@@ -172,6 +237,7 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 		"equivalences":    equivalences,
 		"rtl":             rtl,
 		"matra_map":       matraMap,
+		"key_states":      aggregateKeyStates(guesses, toneLang),
 	}
 	if game.Status != "playing" {
 		addAnswerReveal(resp, game, hanzi)
@@ -288,15 +354,21 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("guess", "id", game.ID, "attempt", attempt, "word", guess, "won", won)
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
+	allGuesses := append(parseGuesses(game.Guesses, nil, toneLang), guessResp{Attempt: attempt, Word: guess, Tiles: guessChars, States: states})
 	resp := map[string]any{
 		"attempt":      attempt,
 		"word":         guess,
+		"tiles":        guessChars,
 		"states":       states,
 		"status":       newStatus,
 		"in_word_list": true,
+		"key_states":   aggregateKeyStates(allGuesses, toneLang),
 	}
 	if chars := hanzi[guess]; chars != "" {
 		resp["chars"] = chars
+	}
+	if won {
+		resp["message"] = winMessage(attempt)
 	}
 	if won || lost {
 		addAnswerReveal(resp, game, hanzi)

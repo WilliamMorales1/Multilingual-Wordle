@@ -1,4 +1,4 @@
-.PHONY: build build-frontend build-backend run dev watch-frontend watch-backend clean
+.PHONY: build build-frontend build-backend run dev tui watch-frontend watch-backend clean
 
 build: build-frontend build-backend
 
@@ -13,6 +13,9 @@ run: build
 
 dev: build-frontend
 	cd backend && go run ./cmd/server
+
+tui:
+	cd backend && go run ./cmd/tui
 
 watch-frontend:
 	cd frontend && npm run watch

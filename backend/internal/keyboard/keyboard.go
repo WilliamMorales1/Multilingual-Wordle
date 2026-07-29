@@ -162,14 +162,15 @@ var keyboardLayouts = map[string][][]string{
 		{"a", "ă", "â", "s", "´", "d", "đ", "`", "g", "h", ".", "k", "l"},
 		{"x", "~", "c", "v", "b", "n", "m"},
 	},
-	// Every dialect's tone is folded by lang.ChineseToneify into one of the four traditional Middle Chinese
-	// tone categories (see https://en.wikipedia.org/wiki/Four_tones_(Middle_Chinese)),
-	// so the same four tone keys cover every dialect's romanization.
+	// lang.ChineseToneify keeps each dialect's own tone number as its trailing
+	// tile (e.g. Mandarin 1-4, Jyutping 1-6, POJ/Tâi-lô 1-8), so this row lists
+	// every digit any dialect uses — BuildKeyboardData filters it down to the
+	// digits actually present in the selected dialect's alphabet.
 	"chinese": {
 		{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
 		{"a", "s", "d", "f", "g", "h", "j", "k", "l"},
 		{"z", "x", "c", "ü", "b", "n", "m"},
-		{lang.TonePing, lang.ToneShang, lang.ToneQu, lang.ToneRu}, // 平 上 去 入
+		{"1", "2", "3", "4", "5", "6", "7", "8"},
 	},
 	"cangjie": {
 		{"手", "田", "水", "口", "廿", "卜", "山", "戈", "人", "心"},

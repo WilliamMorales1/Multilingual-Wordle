@@ -1,7 +1,7 @@
 import { S } from './state.js';
 import { api } from './api.js';
 import { buildBoard, updateCurrentRow, revealRow, bounceRow, shakeRow, setRowCaption } from './board.js';
-import { buildKeyboard, buildFlickKeyboard, refreshKeyboard, refreshVowelKeys, stripDiacritics, markDisplay } from './keyboard.js';
+import { buildKeyboard, buildFlickKeyboard, refreshKeyboard, refreshVowelKeys, markDisplay } from './keyboard.js';
 import { toast, openModal, closeModal, showEquivNotice, showStats } from './ui.js';
 
 let _progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -84,15 +84,7 @@ export async function onEnter(): Promise<void> {
   const chars  = [...word];
   const states = result.states;
 
-  const PRI: Record<string, number> = { correct: 3, present: 2, absent: 1 };
-  chars.forEach((ch, i) => {
-    const baseKey = stripDiacritics(ch);
-    const oldSt = S.charStates[baseKey];
-    const newSt = states[i];
-    if (!oldSt || (PRI[newSt] ?? 0) > (PRI[oldSt] ?? 0)) {
-      S.charStates[baseKey] = newSt;
-    }
-  });
+  S.charStates = result.key_states ?? S.charStates;
 
   for (let c = 0; c < S.wordLength; c++) {
     const t = document.getElementById(`tile-${rowIdx}-${c}`);
@@ -113,8 +105,7 @@ export async function onEnter(): Promise<void> {
       S.status = 'won';
       S.lastAttempt = result.attempt;
       bounceRow(rowIdx);
-      const msgs = ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'];
-      toast(msgs[Math.min(result.attempt - 1, msgs.length - 1)], 0);
+      toast(result.message ?? 'Genius!', 0);
       setTimeout(() => showStats(result), 2000);
     } else if (result.status === 'lost') {
       S.status = 'lost';

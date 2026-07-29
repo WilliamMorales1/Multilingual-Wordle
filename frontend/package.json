@@ -7,7 +7,10 @@
     "watch": "esbuild src/main.ts --bundle --outfile=public/script.js --watch"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.24.2",
     "typescript": "^5.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.24.2": true
   }
 }

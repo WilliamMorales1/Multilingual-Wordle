@@ -38,7 +38,8 @@ document.getElementById('equiv-close')!.addEventListener('click', () => {
 });
 document.getElementById('clearCacheBtn')!.addEventListener('click', async () => {
   try {
-    await api.clearCache(S.status === 'playing' ? S.gameId : null);
+    const langInput = (document.getElementById('langInput') as HTMLInputElement | null)?.value.trim();
+    await api.clearCache(S.status === 'playing' ? S.gameId : null, S.status === 'playing' ? undefined : (langInput || S.lang));
     toast('Cache cleared');
   } catch (_) {
     toast('Failed to clear cache');
