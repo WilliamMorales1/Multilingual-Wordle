@@ -1,9 +1,8 @@
 package lang
 
 import (
+	"maps"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -53,9 +52,30 @@ func KatakanaToHiragana(word string) string {
 	return buf.String()
 }
 
+// ChoonMark is the prolonged-sound mark ー (U+30FC). It is shared by both
+// kana scripts, so KatakanaToHiragana leaves it alone — ラーメン converts to
+// らーめん, not to a katakana leftover — and it is a key of its own on the
+// kana keyboard.
+const ChoonMark = 0x30FC
+
+// IsPureHiragana reports whether a word is written entirely in hiragana
+// proper: U+3041ぁ through U+3096ゖ, plus the iteration marks ゝ/ゞ and the
+// prolonged-sound mark ー. The rest of the block (U+3099-U+309C combining/
+// standalone dakuten, U+309D-U+309F's katakana-only and vertical variants)
+// is deliberately excluded — a bare combining mark isn't a tile anyone can
+// type on the kana keyboard.
+//
+// ー has to be accepted: it is not in the hiragana block, but every long
+// vowel written in kana uses it, so excluding it threw away every loanword
+// (らーめん, こーひー, けーき) after KatakanaToHiragana had just produced it,
+// while the keyboard still offered a ー key that could never spell anything.
 func IsPureHiragana(word string) bool {
 	for _, r := range word {
-		if r < 0x3041 || r > 0x309F {
+		switch {
+		case r >= 0x3041 && r <= 0x3096: // ぁ..ゖ
+		case r == 0x309D || r == 0x309E: // ゝ ゞ
+		case r == ChoonMark: // ー
+		default:
 			return false
 		}
 	}
@@ -96,18 +116,24 @@ func IsPureJamo(word string) bool {
 	return len(word) > 0
 }
 
+// toneTranslationsByKind maps a language's combining tone marks to the
+// standalone tile (and keyboard key) that stands for them. Tones are typed as
+// their own keystroke in these languages' IMEs, so they're guessed as their
+// own tile rather than folded into the base letter.
 var toneTranslationsByKind = map[string]map[rune]string{
 	"vietnamese": {
-		0x0300: "`",  // huyền (grave)        -> GRAVE ACCENT
-		0x0301: "´",  // sắc (acute)          -> ACUTE ACCENT
-		0x0303: "~",  // ngã (tilde)          -> TILDE
-		0x0309: "ˀ",  // hỏi (hook above)     -> MODIFIER LETTER GLOTTAL STOP
-		0x0323: ".",  // nặng (dot below)     -> FULL STOP
+		0x0300: "`", // huyền (grave)        -> GRAVE ACCENT
+		0x0301: "´", // sắc (acute)          -> ACUTE ACCENT
+		0x0303: "~", // ngã (tilde)          -> TILDE
+		0x0309: "ˀ", // hỏi (hook above)     -> MODIFIER LETTER GLOTTAL STOP
+		0x0323: ".", // nặng (dot below)     -> FULL STOP
 	},
 }
 
 // ToneSplitKind reports which combining-mark tone-splitting scheme a language
 // uses ("vietnamese" or "" if none), based on the requested language name.
+// Chinese romanizations are toneless (see ChineseRomanize) and zhuyin already
+// carries its tones as standalone marks, so neither needs splitting.
 func ToneSplitKind(lng string) string {
 	if strings.EqualFold(lng, "Vietnamese") {
 		return "vietnamese"
@@ -128,23 +154,22 @@ func wordCharsToneSplit(word, kind string) []string {
 		var char strings.Builder
 		char.WriteRune(runes[i])
 		i++
-		var tone string
+		// Every tone mark on this cluster splits off, not just the first:
+		// a syllable carrying two of them is two extra keystrokes in the
+		// IME, so it has to be two extra tiles.
+		var tones []string
 		for i < len(runes) && unicode.In(runes[i], unicode.Mn, unicode.Mc, unicode.Me) {
 			r := runes[i]
-			if tone == "" {
-				if t, ok := toneMarks[r]; ok {
-					tone = t
-					i++
-					continue
-				}
+			if t, ok := toneMarks[r]; ok {
+				tones = append(tones, t)
+				i++
+				continue
 			}
 			char.WriteRune(r)
 			i++
 		}
 		chars = append(chars, norm.NFC.String(char.String()))
-		if tone != "" {
-			chars = append(chars, tone)
-		}
+		chars = append(chars, tones...)
 	}
 	return chars
 }
@@ -186,23 +211,59 @@ func WordChars(word, toneLang string) []string {
 	return chars
 }
 
-func wordLen(word, toneLang string) int { return len(WordChars(word, toneLang)) }
+// WordLen counts a word's guessable tiles (not its runes or bytes).
+func WordLen(word, toneLang string) int { return len(WordChars(word, toneLang)) }
+
+// zhuyinToneMarks are the standalone bopomofo tone marks typed as their own
+// key in a zhuyin IME. They're kept as tiles, so IsWordChar accepts them even
+// though Unicode files ˙ (U+02D9) as a symbol rather than a letter.
+var zhuyinToneMarks = map[rune]bool{
+	'ˊ': true, // 2nd tone
+	'ˇ': true, // 3rd tone
+	'ˋ': true, // 4th tone
+	'˙': true, // neutral tone
+}
 
 func IsWordChar(r rune) bool {
-	return unicode.In(r, unicode.Ll, unicode.Lu, unicode.Lt, unicode.Lo, unicode.Lm,
+	return zhuyinToneMarks[r] || unicode.In(r, unicode.Ll, unicode.Lu, unicode.Lt, unicode.Lo, unicode.Lm,
 		unicode.Mn, unicode.Mc, unicode.Me)
 }
 
-func IsValid(word string, length int, toneLang string) bool {
-	if wordLen(word, toneLang) != length {
-		return false
+// toneTileRunes is every rune a tone-split language's standalone tone tile is
+// made of (see toneTranslationsByKind). Several of them — "`", "~", ".", "´" —
+// are punctuation or symbols to Unicode, so IsWordChar rejects them, but a
+// client types them as their own key and submits them as part of the guess.
+var toneTileRunes = func() map[rune]bool {
+	m := make(map[rune]bool)
+	for _, table := range toneTranslationsByKind {
+		for _, tile := range table {
+			for _, r := range tile {
+				m[r] = true
+			}
+		}
 	}
+	return m
+}()
+
+// IsGuessChar reports whether a rune may appear in a submitted guess. It is
+// IsWordChar plus the tone tiles: a Vietnamese guess arrives as the tiles the
+// on-screen keyboard produced ("ă´n"), not as the composed word ("ắn"), so
+// validating it with IsWordChar alone rejects every toned guess.
+func IsGuessChar(r rune) bool { return IsWordChar(r) || toneTileRunes[r] }
+
+// IsWord reports whether a word is made only of word chars — no digits,
+// spaces or punctuation, so it's typeable on the game's keyboard.
+func IsWord(word string) bool {
 	for _, r := range word {
 		if !IsWordChar(r) {
 			return false
 		}
 	}
 	return true
+}
+
+func IsValid(word string, length int, toneLang string) bool {
+	return WordLen(word, toneLang) == length && IsWord(word)
 }
 
 func normalizeKanaRune(r rune) rune {
@@ -330,10 +391,19 @@ func NormalizeWord(word, toneLang string) string {
 	return b.String()
 }
 
+// BuildNormalizedSet maps each word's accent-insensitive form back to a
+// canonical spelling. Several words can share one normalized form ("cafe" and
+// "café"); the lexicographically smallest wins, so the same word list always
+// resolves an accent-stripped guess to the same word — picking whichever word
+// Go's randomized map iteration reached last would differ per process.
 func BuildNormalizedSet(words map[string]string, toneLang string) map[string]string {
 	set := make(map[string]string, len(words))
 	for w := range words {
-		set[NormalizeWord(w, toneLang)] = w
+		key := NormalizeWord(w, toneLang)
+		if prev, ok := set[key]; ok && prev <= w {
+			continue
+		}
+		set[key] = w
 	}
 	return set
 }
@@ -345,12 +415,7 @@ func BuildAlphabet(wordList map[string]string, toneLang string) []string {
 			charSet[ch] = true
 		}
 	}
-	chars := make([]string, 0, len(charSet))
-	for ch := range charSet {
-		chars = append(chars, ch)
-	}
-	sort.Strings(chars)
-	return chars
+	return slices.Sorted(maps.Keys(charSet))
 }
 
 // MatchWildcard finds the lexicographically smallest canonical word whose
@@ -389,8 +454,15 @@ func MatchWildcard(guessChars []string, normSet map[string]string, overflowBaseS
 
 // Evaluate returns per-character states ("correct"/"present"/"absent") for a guess.
 // Comparison is accent-insensitive.
+//
+// A guess shorter than the answer is padded with "absent" rather than
+// indexed past its end: callers validate the tile count first, but a panic
+// deep in evaluation is a poor way to find out one of them forgot to.
 func Evaluate(guessChars, answerChars []string) []string {
 	length := len(answerChars)
+	if len(guessChars) < length {
+		guessChars = append(slices.Clone(guessChars), make([]string, length-len(guessChars))...)
+	}
 	states := make([]string, length)
 	normGuess := make([]string, length)
 	normAnswer := make([]string, length)
@@ -398,7 +470,7 @@ func Evaluate(guessChars, answerChars []string) []string {
 	for i := range length {
 		normGuess[i] = NormalizeChar(guessChars[i])
 		normAnswer[i] = NormalizeChar(answerChars[i])
-		if normGuess[i] == normAnswer[i] {
+		if normGuess[i] != "" && normGuess[i] == normAnswer[i] {
 			states[i] = "correct"
 		} else {
 			states[i] = "absent"
@@ -412,7 +484,9 @@ func Evaluate(guessChars, answerChars []string) []string {
 		}
 	}
 	for i, g := range normGuess {
-		if states[i] == "correct" {
+		// "" is a tile the guess never supplied (a short guess, padded
+		// above); it must not claim one of the answer's letters.
+		if states[i] == "correct" || g == "" {
 			continue
 		}
 		for j, p := range pool {
@@ -426,120 +500,40 @@ func Evaluate(guessChars, answerChars []string) []string {
 	return states
 }
 
-// mandarinToneMarks maps Wiktionary pinyin's NFD combining marks (macron/
-// acute/caron/grave) to their conventional pinyin tone number (1-4), per
-// https://en.wikipedia.org/wiki/Pinyin#Tone_marks.
-var mandarinToneMarks = map[rune]string{
-	0x0304: "1", // macron  (ā) - tone 1, flat
-	0x0301: "2", // acute   (á) - tone 2, rising
-	0x030C: "3", // caron   (ǎ) - tone 3, dipping
-	0x0300: "4", // grave   (à) - tone 4, falling
+// mandarinToneMarks are pinyin's NFD combining tone marks (macron/acute/
+// caron/grave). Tones aren't part of the guess, so these are stripped from a
+// reading, leaving only the letters typed on the keyboard. The diaeresis of
+// "ü" is deliberately absent — it's a letter choice, not a tone.
+var mandarinToneMarks = map[rune]bool{
+	0x0304: true, // macron (ā)
+	0x0301: true, // acute  (á)
+	0x030C: true, // caron  (ǎ)
+	0x0300: true, // grave  (à)
 }
 
-var superscriptDigits = map[rune]int{
-	'⁰': 0, '¹': 1, '²': 2, '³': 3, '⁴': 4,
-	'⁵': 5, '⁶': 6, '⁷': 7, '⁸': 8, '⁹': 9,
-}
-
-func digitValue(r rune) (int, bool) {
-	if r >= '0' && r <= '9' {
-		return int(r - '0'), true
-	}
-	if n, ok := superscriptDigits[r]; ok {
-		return n, true
-	}
-	return 0, false
-}
-
-// mandarinToneify folds pinyin's diacritic tone marks into trailing numeral
-// tiles (1-4, conventional pinyin tone-number notation) char by char —
-// Wiktionary's readings are often concatenated without syllable separators,
-// so unlike other dialects this can't split on hyphens.
-func mandarinToneify(rom string) string {
-	normalized := norm.NFD.String(rom)
-	runes := []rune(normalized)
+func stripMandarinToneMarks(rom string) string {
 	var out strings.Builder
-	i := 0
-	for i < len(runes) {
-		var base strings.Builder
-		base.WriteRune(runes[i])
-		i++
-		var tone string
-		for i < len(runes) && unicode.In(runes[i], unicode.Mn, unicode.Mc, unicode.Me) {
-			r := runes[i]
-			if tone == "" {
-				if t, ok := mandarinToneMarks[r]; ok {
-					tone = t
-					i++
-					continue
-				}
-			}
-			base.WriteRune(r)
-			i++
-		}
-		out.WriteString(norm.NFC.String(base.String()))
-		if tone != "" {
-			out.WriteString(tone)
+	for _, r := range norm.NFD.String(rom) {
+		if !mandarinToneMarks[r] {
+			out.WriteRune(r)
 		}
 	}
-	return out.String()
+	return norm.NFC.String(out.String())
 }
 
-// ChineseToneify converts a dialect's raw romanization into a guessable word
-// where each syllable's tone number is kept as its own trailing numeral
-// tile, using that dialect's own conventional tone-number notation (e.g.
-// Jyutping 1-6, POJ/Tâi-lô 1-8) rather than collapsing distinct tones into a
-// shared category.
-//
-// Syllables are split on tone-number digit runs (which terminate a syllable
-// and become its tile) and on any other non-word rune (space/hyphen/comma/
-// parenthesis/etc., which separates syllables without itself carrying a
-// tone) — this also recovers tones for entries where Wiktionary fuses
-// adjacent syllables with no separator at all, e.g. "aa1het6" (two
-// syllables, no space between them).
-func ChineseToneify(dialect, rom string) string {
+// ChineseRomanize converts a dialect's raw romanization into a guessable word
+// made only of the letters the keyboard types: tone notation is dropped
+// (Mandarin's pinyin diacritics, the other dialects' trailing tone numerals),
+// as are the space/hyphen/punctuation syllable separators Wiktionary uses.
+func ChineseRomanize(dialect, rom string) string {
 	if dialect == "Mandarin" {
-		return mandarinToneify(rom)
+		rom = stripMandarinToneMarks(rom)
 	}
-
-	var out, letters strings.Builder
-	flush := func(digit int) {
-		clean := letters.String()
-		letters.Reset()
-		if clean == "" {
-			return
-		}
-		out.WriteString(clean)
-		if digit > 0 {
-			out.WriteString(strconv.Itoa(digit))
+	var out strings.Builder
+	for _, r := range rom {
+		if IsWordChar(r) {
+			out.WriteRune(r)
 		}
 	}
-
-	runes := []rune(rom)
-	for i := 0; i < len(runes); {
-		if r := runes[i]; IsWordChar(r) {
-			letters.WriteRune(r)
-			i++
-			continue
-		}
-		if _, ok := digitValue(runes[i]); ok {
-			n := 0
-			j := i
-			for j < len(runes) {
-				d, ok := digitValue(runes[j])
-				if !ok {
-					break
-				}
-				n = n*10 + d
-				j++
-			}
-			flush(n)
-			i = j
-			continue
-		}
-		flush(0)
-		i++
-	}
-	flush(0)
 	return out.String()
 }

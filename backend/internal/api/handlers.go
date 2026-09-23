@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,16 @@ import (
 func jsonOK(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// gameLookupStatus maps a store.GetGame failure to a status code: 404 only
+// when the game really isn't there, 500 when the database itself failed. A
+// blanket 404 told the client the game was gone every time SQLite was busy.
+func gameLookupStatus(err error) int {
+	if errors.Is(err, store.ErrNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
 }
 
 func jsonErr(w http.ResponseWriter, msg string, code int) {
@@ -77,17 +88,12 @@ func aggregateKeyStates(records []guessResp, toneLang string) map[string]string 
 var winMessages = []string{"Genius!", "Magnificent!", "Impressive!", "Splendid!", "Great!", "Phew!"}
 
 func winMessage(attempt int) string {
-	idx := attempt - 1
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(winMessages) {
-		idx = len(winMessages) - 1
-	}
+	idx := min(max(attempt-1, 0), len(winMessages)-1)
 	return winMessages[idx]
 }
 
-// addAnswerReveal fills in answer/definition/chars/etymology once a game is won.
+// addAnswerReveal fills in answer/definition/chars/etymology once a game is over
+// (won or lost) — until then the answer must not reach the client.
 func addAnswerReveal(resp map[string]any, game *store.Game, hanzi map[string]string) {
 	resp["answer"] = game.Answer
 	if words, err := wordlist.GetCachedWordList(game.Lang, game.WordLength); err == nil {
@@ -119,12 +125,12 @@ func HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	if req.GameID != 0 {
 		game, err := store.GetGame(req.GameID)
 		if err != nil {
-			jsonErr(w, "game not found", http.StatusNotFound)
+			jsonErr(w, err.Error(), gameLookupStatus(err))
 			return
 		}
 		key = wordlist.Key{Lang: game.Lang, Len: game.WordLength}
 	} else if lng := strings.TrimSpace(req.Lang); lng != "" {
-		key = wordlist.Key{Lang: lng, Len: keyboard.DefaultLengthForLang(lng)}
+		key = wordlist.Key{Lang: lng, Len: wordlist.DefaultLength(lng)}
 	} else {
 		jsonErr(w, "game_id or lang is required", http.StatusBadRequest)
 		return
@@ -153,9 +159,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	length := keyboard.DefaultLengthForLang(req.Lang)
-
-	words, err := wordlist.GetCachedWordList(req.Lang, length)
+	words, length, err := wordlist.GetCachedWordListAuto(req.Lang)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -205,7 +209,7 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 
 	game, err := store.GetGame(uint(id))
 	if err != nil {
-		jsonErr(w, "game not found", http.StatusNotFound)
+		jsonErr(w, err.Error(), gameLookupStatus(err))
 		return
 	}
 
@@ -264,7 +268,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 
 	game, err := store.GetGame(uint(id))
 	if err != nil {
-		jsonErr(w, "game not found", http.StatusNotFound)
+		jsonErr(w, err.Error(), gameLookupStatus(err))
 		return
 	}
 	if game.Status != "playing" {
@@ -273,7 +277,6 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toneLang := lang.ToneSplitKind(game.Lang)
-
 	guess := strings.ToLower(strings.TrimSpace(req.Word))
 	if lang.IsJapaneseLang(game.Lang) {
 		guess = lang.KatakanaToHiragana(guess)
@@ -285,7 +288,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, ch := range guess {
-		if ch != '*' && !lang.IsWordChar(ch) {
+		if ch != '*' && !lang.IsGuessChar(ch) {
 			jsonErr(w, "word contains invalid characters", http.StatusBadRequest)
 			return
 		}
@@ -331,13 +334,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 
 	const maxGuesses = 6
 
-	won := true
-	for _, st := range states {
-		if st != "correct" {
-			won = false
-			break
-		}
-	}
+	won := !slices.ContainsFunc(states, func(st string) bool { return st != "correct" })
 	lost := !won && attempt >= maxGuesses
 	newStatus := game.Status
 	if won {
@@ -354,7 +351,7 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("guess", "id", game.ID, "attempt", attempt, "word", guess, "won", won)
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
-	allGuesses := append(parseGuesses(game.Guesses, nil, toneLang), guessResp{Attempt: attempt, Word: guess, Tiles: guessChars, States: states})
+	allGuesses := append(parseGuesses(game.Guesses, hanzi, toneLang), guessResp{Attempt: attempt, Word: guess, Chars: hanzi[guess], Tiles: guessChars, States: states})
 	resp := map[string]any{
 		"attempt":      attempt,
 		"word":         guess,
@@ -377,6 +374,45 @@ func HandleGuess(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, resp)
 }
 
+// statsSummary is the win/streak arithmetic over a language's finished games.
+type statsSummary struct {
+	Played        int
+	Won           int
+	WinPct        int
+	CurrentStreak int
+	MaxStreak     int
+	WonIDs        []uint
+}
+
+// summarizeGames folds finished games — oldest first, wins *and* losses —
+// into the numbers the stats modal shows. Feeding it wins only makes every
+// field meaningless (100% win rate, a streak as long as the history), so the
+// query behind it must not filter losses out.
+func summarizeGames(games []store.Game) statsSummary {
+	s := statsSummary{Played: len(games)}
+
+	streak := 0
+	for _, g := range games {
+		if g.Status != "won" {
+			streak = 0
+			continue
+		}
+		s.Won++
+		s.WonIDs = append(s.WonIDs, g.ID)
+		streak++
+		s.MaxStreak = max(s.MaxStreak, streak)
+	}
+
+	if s.Played > 0 {
+		s.WinPct = s.Won * 100 / s.Played
+	}
+
+	for i := len(games) - 1; i >= 0 && games[i].Status == "won"; i-- {
+		s.CurrentStreak++
+	}
+	return s
+}
+
 // GET /api/stats?lang=X&length=Y.
 func HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	lng := r.URL.Query().Get("lang")
@@ -388,53 +424,15 @@ func HandleGetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total, wonCount := len(games), 0
-	for _, g := range games {
-		if g.Status == "won" {
-			wonCount++
-		}
-	}
-
-	winPct := 0
-	if total > 0 {
-		winPct = wonCount * 100 / total
-	}
-
-	maxStreak, streak := 0, 0
-	for _, g := range games {
-		if g.Status == "won" {
-			streak++
-			if streak > maxStreak {
-				maxStreak = streak
-			}
-		} else {
-			streak = 0
-		}
-	}
-
-	currentStreak := 0
-	for i := len(games) - 1; i >= 0; i-- {
-		if games[i].Status == "won" {
-			currentStreak++
-		} else {
-			break
-		}
-	}
-
-	wonIDs := make([]uint, 0, wonCount)
-	for _, g := range games {
-		if g.Status == "won" {
-			wonIDs = append(wonIDs, g.ID)
-		}
-	}
-	distribution, _ := store.GetGuessDistribution(wonIDs)
+	s := summarizeGames(games)
+	distribution, _ := store.GetGuessDistribution(s.WonIDs)
 
 	jsonOK(w, map[string]any{
-		"games_played":   total,
-		"games_won":      wonCount,
-		"win_pct":        winPct,
-		"current_streak": currentStreak,
-		"max_streak":     maxStreak,
+		"games_played":   s.Played,
+		"games_won":      s.Won,
+		"win_pct":        s.WinPct,
+		"current_streak": s.CurrentStreak,
+		"max_streak":     s.MaxStreak,
 		"distribution":   distribution,
 	})
 }
@@ -444,18 +442,18 @@ func HandleGetLanguages(w http.ResponseWriter, r *http.Request) {
 	langs := wordlist.GetCachedLanguages()
 	defaultLengths := make(map[string]int, len(langs))
 	for _, l := range langs {
-		defaultLengths[l] = keyboard.DefaultLengthForLang(l)
+		defaultLengths[l] = wordlist.DefaultLength(l)
 	}
 	jsonOK(w, map[string]any{"languages": langs, "default_lengths": defaultLengths})
 }
 
-// GET /api/progress?lang=X&length=Y.
+// GET /api/progress?lang=X (length is accepted but ignored — progress is
+// tracked per language, since an auto-length download picks its length
+// partway through).
 func HandleGetProgress(w http.ResponseWriter, r *http.Request) {
 	lng := r.URL.Query().Get("lang")
-	length, _ := strconv.Atoi(r.URL.Query().Get("length"))
-	key := fmt.Sprintf("%s:%d", lng, length)
 	count := 0
-	if v, ok := wordlist.DownloadProgress.Load(key); ok {
+	if v, ok := wordlist.DownloadProgress.Load(lng); ok {
 		count = v.(int)
 	}
 	jsonOK(w, map[string]any{"count": count})

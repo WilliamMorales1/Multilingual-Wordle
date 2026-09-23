@@ -39,14 +39,42 @@ header {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
 }
-header h1 {
+/* Title + current language share the line box the old 1.7rem h1 occupied,
+   so adding the language line costs no header height. See test/header-layout. */
+.title-block {
     grid-column: 2;
+    /* 1lh of a 1.7rem line box == exactly the height the old h1 occupied,
+       whatever the font's metrics are. */
     font-size: 1.7rem;
+    line-height: normal;
+    height: 1lh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+header h1 {
+    font-size: 1.25rem;
+    line-height: 1.1;
     font-weight: 700;
     letter-spacing: 0.15em;
     text-transform: uppercase;
     text-align: center;
 }
+.current-lang {
+    font-size: 0.65rem;
+    line-height: 1.1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--text-muted, var(--text));
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+.current-lang:empty { display: none; }
 .header-btns { display: flex; gap: 8px; }
 .header-btns:last-of-type { justify-self: end; }
 .icon-btn {

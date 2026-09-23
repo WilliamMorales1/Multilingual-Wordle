@@ -1,0 +1,32 @@
+# Keep the build context small: everything below is either rebuilt inside the
+# image or is local-only state that must never reach the deployed machine.
+
+# Downloaded kaikki.org dictionary dumps (tens of GB once warmed). On fly.io
+# these live on the /data volume, not in the image.
+backend/cache/
+
+# Local SQLite database and its WAL sidecars. Production uses the volume.
+backend/wordgo.db
+backend/wordgo.db-wal
+backend/wordgo.db-shm
+
+# Locally built binaries; the image builds its own.
+backend/wordgo
+backend/wordgo.exe
+backend/tmp/
+backend/test-logs/
+
+# Installed by `npm ci` inside the frontend-builder stage.
+frontend/node_modules/
+
+# Bundled by `npm run build` inside the frontend-builder stage.
+frontend/public/script.js
+
+# Repo and editor metadata.
+.git/
+.gitignore
+.github/
+.dockerignore
+Dockerfile
+README.md
+TODO.md

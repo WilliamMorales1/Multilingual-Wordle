@@ -6,15 +6,21 @@ import { toast, openModal, closeModal, showEquivNotice, showStats } from './ui.j
 
 let _progressTimer: ReturnType<typeof setInterval> | null = null;
 
-function startProgressPolling(lang: string, length: number): void {
+// A download runs for minutes, so the word counter has to tick often enough
+// to read as progress rather than as a frozen page.
+const PROGRESS_POLL_MS = 2000;
+
+function startProgressPolling(lang: string): void {
   const el = document.getElementById('loading-count');
   if (el) el.textContent = '';
-  _progressTimer = setInterval(async () => {
+  const poll = async () => {
     try {
-      const { count } = await api.progress(lang, length);
+      const { count } = await api.progress(lang);
       if (el && count > 0) el.textContent = `${count.toLocaleString()} words found so far…`;
     } catch (_) {}
-  }, 60000);
+  };
+  poll();
+  _progressTimer = setInterval(poll, PROGRESS_POLL_MS);
 }
 
 function stopProgressPolling(): void {
@@ -81,14 +87,18 @@ export async function onEnter(): Promise<void> {
   }
 
   const rowIdx = S.currentRow;
-  const chars  = [...word];
+  // The server's tiles, not [...word]: a tile is a grapheme cluster (a
+  // consonant plus its matra, a Vietnamese tone mark on its own), so
+  // splitting the string by code point would misalign the tiles against
+  // `states` for every script that has them.
+  const chars  = result.tiles ?? [...word];
   const states = result.states;
 
   S.charStates = result.key_states ?? S.charStates;
 
   for (let c = 0; c < S.wordLength; c++) {
     const t = document.getElementById(`tile-${rowIdx}-${c}`);
-    if (t) t.textContent = markDisplay(chars[c] ?? '');
+    if (t) t.textContent = chars[c] ? markDisplay(chars[c]) : '';
   }
 
   setRowCaption(rowIdx, result.chars);
@@ -126,7 +136,7 @@ export async function startGame(): Promise<void> {
   document.getElementById('board')!.style.display    = 'none';
   document.getElementById('keyboard')!.style.display = 'none';
 
-  startProgressPolling(lang, S.wordLength);
+  startProgressPolling(lang);
 
   let result;
   try {
@@ -149,6 +159,9 @@ export async function startGame(): Promise<void> {
     openModal('settingsModal');
     return;
   }
+
+  const langLabel = document.getElementById('currentLang');
+  if (langLabel) langLabel.textContent = lang;
 
   S.gameId    = result.id;
   S.status    = 'playing';

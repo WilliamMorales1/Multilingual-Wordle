@@ -47,11 +47,17 @@ document.getElementById('clearCacheBtn')!.addEventListener('click', async () => 
 });
 
 document.querySelectorAll<HTMLElement>('.modal').forEach(m => {
+  // Only close when the press *started* on the backdrop. A click whose mousedown
+  // landed inside the box (e.g. a dropdown option overlapping the backdrop) is
+  // retargeted to the modal by the browser and must not close it.
+  let downOnBackdrop = false;
+  m.addEventListener('mousedown', e => { downOnBackdrop = e.target === m; });
   m.addEventListener('click', e => {
-    if (e.target === m) {
+    if (e.target === m && downOnBackdrop) {
       if (m.id === 'settingsModal' && S.status === 'idle') return;
       closeModal(m.id);
     }
+    downOnBackdrop = false;
   });
 });
 

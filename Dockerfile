@@ -1,4 +1,4 @@
-FROM golang:1.26 AS builder
+FROM golang:1.27 AS builder
 WORKDIR /app
 COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o wordgo ./cmd/server

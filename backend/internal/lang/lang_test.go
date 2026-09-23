@@ -1,7 +1,7 @@
 package lang
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -20,7 +20,7 @@ func TestWordChars(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := WordChars(c.word, c.toneLang)
-			if !reflect.DeepEqual(got, c.want) {
+			if !slices.Equal(got, c.want) {
 				t.Errorf("WordChars(%q, %q) = %v, want %v", c.word, c.toneLang, got, c.want)
 			}
 		})
@@ -40,6 +40,19 @@ func TestVietnameseToneSplitTranslatesMark(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected tone tile %q in %v", "´", chars)
+	}
+}
+
+func TestZhuyinToneMarksAreWordChars(t *testing.T) {
+	// A zhuyin reading keeps its tone marks as tiles, so IsValid must accept
+	// them — ˙ (neutral tone) is a Unicode symbol, not a letter.
+	for _, r := range []rune{'ˊ', 'ˇ', 'ˋ', '˙'} {
+		if !IsWordChar(r) {
+			t.Errorf("IsWordChar(%q) = false, want true", r)
+		}
+	}
+	if !IsValid("ㄇㄚˊ", 3, "") {
+		t.Errorf("IsValid(%q, 3) = false, want true", "ㄇㄚˊ")
 	}
 }
 
@@ -85,7 +98,7 @@ func TestEvaluate(t *testing.T) {
 			g := WordChars(c.guess, "")
 			a := WordChars(c.answer, "")
 			got := Evaluate(g, a)
-			if !reflect.DeepEqual(got, c.want) {
+			if !slices.Equal(got, c.want) {
 				t.Errorf("Evaluate(%q, %q) = %v, want %v", c.guess, c.answer, got, c.want)
 			}
 		})
@@ -111,28 +124,32 @@ func TestIsValid(t *testing.T) {
 	}
 }
 
-func TestChineseToneifyMandarin(t *testing.T) {
-	// NFD-composed pinyin with combining tone marks over "a" (macron=1) and
-	// "e" (acute=2) folds each into a trailing numeral tile.
-	got := ChineseToneify("Mandarin", "āé") // ā é (precomposed) folds via NFD
-	want := "a1e2"
-	if got != want {
-		t.Errorf("ChineseToneify(Mandarin) = %q, want %q", got, want)
+func TestChineseRomanizeMandarin(t *testing.T) {
+	cases := []struct{ rom, want string }{
+		{"āé", "ae"},        // pinyin tone diacritics drop
+		{"lǜ", "lü"},        // ü keeps its diaeresis, loses the tone
+		{"nǐ hǎo", "nihao"}, // separators drop
+	}
+	for _, c := range cases {
+		if got := ChineseRomanize("Mandarin", c.rom); got != c.want {
+			t.Errorf("ChineseRomanize(Mandarin, %q) = %q, want %q", c.rom, got, c.want)
+		}
 	}
 }
 
-func TestChineseToneifyDialect(t *testing.T) {
+func TestChineseRomanizeDialect(t *testing.T) {
 	cases := []struct {
 		name, dialect, rom, want string
 	}{
-		{"single syllable with tone", "Cantonese", "aa1", "aa1"},
-		{"fused syllables recover both tones", "Cantonese", "aa1het6", "aa1het6"},
-		{"space-separated syllables", "Hokkien", "chiah4 png7", "chiah4png7"},
+		{"single syllable", "Cantonese", "aa1", "aa"},
+		{"fused syllables", "Cantonese", "aa1het6", "aahet"},
+		{"space-separated syllables", "Hokkien", "chiah4 png7", "chiahpng"},
+		{"superscript tone numerals", "Wu", "gu¹teq⁴", "guteq"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := ChineseToneify(c.dialect, c.rom); got != c.want {
-				t.Errorf("ChineseToneify(%q, %q) = %q, want %q", c.dialect, c.rom, got, c.want)
+			if got := ChineseRomanize(c.dialect, c.rom); got != c.want {
+				t.Errorf("ChineseRomanize(%q, %q) = %q, want %q", c.dialect, c.rom, got, c.want)
 			}
 		})
 	}
@@ -148,12 +165,114 @@ func TestMatchWildcardIsDeterministic(t *testing.T) {
 	guessChars := []string{"c", "*", "t"}
 
 	first := MatchWildcard(guessChars, normSet, overflow, "")
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if got := MatchWildcard(guessChars, normSet, overflow, ""); got != first {
 			t.Fatalf("MatchWildcard is nondeterministic: got %q then %q", first, got)
 		}
 	}
 	if first != "cat" {
 		t.Errorf("MatchWildcard picked %q, want lexicographically smallest match %q", first, "cat")
+	}
+}
+
+// Several words can normalize to the same accent-stripped key. Whichever one
+// wins must not depend on Go's randomized map iteration, or the same word
+// list resolves an accent-free guess to a different word in every process.
+func TestBuildNormalizedSetIsDeterministic(t *testing.T) {
+	words := map[string]string{
+		"café": "", "cafe": "", "çafe": "",
+		"élan": "", "elan": "",
+		"naive": "", "naïve": "",
+	}
+
+	first := BuildNormalizedSet(words, "")
+	if got := first["cafe"]; got != "cafe" {
+		t.Errorf("normalized %q resolved to %q, want the lexicographically smallest %q", "cafe", got, "cafe")
+	}
+	for range 50 {
+		got := BuildNormalizedSet(words, "")
+		if len(got) != len(first) {
+			t.Fatalf("set size changed: %d then %d", len(first), len(got))
+		}
+		for k, v := range first {
+			if got[k] != v {
+				t.Fatalf("normalized %q resolved to %q, then to %q", k, v, got[k])
+			}
+		}
+	}
+}
+
+// Evaluate indexes the guess by the answer's tile count. Callers validate the
+// count first, but a mismatch should not take the server down with it.
+func TestEvaluateShortGuessDoesNotPanic(t *testing.T) {
+	states := Evaluate([]string{"c", "a"}, []string{"c", "a", "f", "e"})
+	if len(states) != 4 {
+		t.Fatalf("got %d states, want 4 (one per answer tile)", len(states))
+	}
+	if states[0] != "correct" || states[1] != "correct" {
+		t.Errorf("states[:2] = %v, want both correct", states[:2])
+	}
+	if states[2] != "absent" || states[3] != "absent" {
+		t.Errorf("missing tiles = %v, want absent", states[2:])
+	}
+}
+
+func TestIsPureHiragana(t *testing.T) {
+	cases := []struct {
+		word string
+		want bool
+	}{
+		{"ねこ", true},
+		{"がっこう", true}, // composed dakuten is a hiragana letter of its own
+		{"ゝ", true},    // iteration mark
+		{"", false},
+		{"ネコ", false},   // katakana
+		{"日本", false},   // kanji
+		{"ラーメン", false}, // katakana with a prolonged-sound mark
+		// The prolonged-sound mark is shared by both kana scripts, so the
+		// hiragana form of a long-vowel loanword is still pure hiragana.
+		{"らーめん", true},
+		{"こーひー", true},
+		// A bare combining/standalone dakuten is no tile anyone can type, and
+		// U+309F ゟ is a vertical digraph, not a kana key.
+		{"゙", false},
+		{"か゛", false},
+		{"ゟ", false},
+	}
+	for _, c := range cases {
+		if got := IsPureHiragana(c.word); got != c.want {
+			t.Errorf("IsPureHiragana(%q) = %v, want %v", c.word, got, c.want)
+		}
+	}
+}
+
+// Each tone mark is its own keystroke in a Vietnamese IME, so a cluster that
+// somehow carries two of them owes two tiles, not one.
+func TestWordCharsSplitsEveryToneMark(t *testing.T) {
+	// a + hook above (hỏi) + dot below (nặng), decomposed. NFD reorders
+	// the marks by canonical combining class — the dot below (220) sorts
+	// ahead of the hook above (230) — so that is the order the tiles take.
+	got := WordChars("a\u0309\u0323", "vietnamese")
+	want := []string{"a", ".", "ˀ"}
+	if !slices.Equal(got, want) {
+		t.Errorf("WordChars = %v, want %v", got, want)
+	}
+}
+
+// WordLen counts tiles, which is what the board and the length check use.
+func TestWordLenCountsTiles(t *testing.T) {
+	cases := []struct {
+		word, toneLang string
+		want           int
+	}{
+		{"hello", "", 5},
+		{"café", "", 4},            // the accent rides along on its base letter
+		{"का", "", 2},              // consonant + matra are separate tiles
+		{"tiếng", "vietnamese", 6}, // t i ê ´ n g
+	}
+	for _, c := range cases {
+		if got := WordLen(c.word, c.toneLang); got != c.want {
+			t.Errorf("WordLen(%q, %q) = %d, want %d", c.word, c.toneLang, got, c.want)
+		}
 	}
 }

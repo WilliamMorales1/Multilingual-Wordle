@@ -98,7 +98,7 @@ export function revealRow(rowIdx: number, chars: string[], states: string[], onD
 export function bounceRow(rowIdx: number): void {
   for (let c = 0; c < S.wordLength; c++) {
     const t = document.getElementById(`tile-${rowIdx}-${c}`);
-    if (!t) return;
+    if (!t) continue; // skip a missing tile, don't abandon the rest of the row
     setTimeout(() => {
       t.classList.add('bounce');
       t.addEventListener('animationend', () => t.classList.remove('bounce'), { once: true });

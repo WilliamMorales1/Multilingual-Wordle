@@ -6,26 +6,47 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"maps"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"wordgo/internal/lang"
+	"wordgo/internal/server"
+	"wordgo/internal/store"
 )
 
 const (
-	reset    = "\x1b[0m"
-	bold     = "\x1b[1m"
-	dim      = "\x1b[2m"
-	fgRed    = "\x1b[31m"
-	fgCyan   = "\x1b[36m"
-	bgGreen  = "\x1b[42;30m"
-	bgYellow = "\x1b[43;30m"
-	bgGray   = "\x1b[100;97m"
+	reset  = "\x1b[0m"
+	bold   = "\x1b[1m"
+	dim    = "\x1b[2m"
+	fgRed  = "\x1b[31m"
+	fgCyan = "\x1b[36m"
+	// Tiles use xterm-256 palette indices rather than the basic 8/16 colors:
+	// indices 16-255 are fixed by the spec, while the low 16 are remapped by
+	// the terminal theme, which made "present" tiles show up green.
+	bgGreen  = "\x1b[48;5;71;38;5;235m"  // correct
+	bgYellow = "\x1b[48;5;179;38;5;235m" // present / wrong place
+	bgGray   = "\x1b[48;5;244;38;5;231m" // absent
 )
+
+// legend shows a sample of each tile color so the meaning of the colors is
+// visible without having to guess at them.
+func legend() string {
+	return fmt.Sprintf("%s A %s correct  %s B %s wrong place  %s C %s not in word",
+		bgGreen, reset, bgYellow, reset, bgGray, reset)
+}
 
 func tileColor(state string) string {
 	switch state {
@@ -75,6 +96,8 @@ type gameResp struct {
 	WordLength   int               `json:"word_length"`
 	Status       string            `json:"status"`
 	RTL          bool              `json:"rtl"`
+	KeyboardRows [][]string        `json:"keyboard_rows"`
+	OverflowBase []string          `json:"overflow_bases"`
 	Equivalences [][]string        `json:"equivalences"`
 	KeyStates    map[string]string `json:"key_states"`
 	Error        string            `json:"error"`
@@ -105,27 +128,38 @@ type statsResp struct {
 }
 
 func main() {
-	baseURL := os.Getenv("WORDGO_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := cmp.Or(os.Getenv("WORDGO_URL"), "http://localhost:8080")
 	client := &apiClient{baseURL: baseURL, http: &http.Client{Timeout: 65 * time.Second}}
 	reader := bufio.NewReader(os.Stdin)
 	var history []string
 
 	fmt.Printf("%s%swordgo%s — terminal Wordle\n", bold, fgCyan, reset)
+
+	// Playing from the terminal should not require starting the web server
+	// first. If nothing answers at baseURL, serve the same API in-process on
+	// a loopback port and talk to that instead.
+	if !serverUp(client) {
+		embedded, err := startEmbeddedServer()
+		if err != nil {
+			fmt.Printf("%sNo server at %s and could not start one: %v%s\n", fgRed, baseURL, err, reset)
+			os.Exit(1)
+		}
+		client.baseURL = embedded
+		fmt.Printf("%sNo server at %s, using a built-in one.%s\n", dim, baseURL, reset)
+		baseURL = embedded
+	}
 	fmt.Printf("Server: %s\n\n", baseURL)
 
 	for {
-		lang := promptLanguage(reader, client)
-		game, err := startGame(client, lang)
+		language := promptLanguage(reader, client)
+		game, err := startGame(client, language)
 		if err != nil {
 			fmt.Printf("%sCould not start game: %v%s\n", fgRed, err, reset)
 			continue
 		}
 		playGame(reader, client, game, &history)
 
-		fmt.Print("\nPlay in a differnet language? [Y/n] ")
+		fmt.Print("\nPlay in a different language? [Y/n] ")
 		again, _ := reader.ReadString('\n')
 		if strings.EqualFold(strings.TrimSpace(again), "n") {
 			break
@@ -134,13 +168,46 @@ func main() {
 	}
 }
 
+// serverUp reports whether an API is already answering at the client's base URL.
+func serverUp(client *apiClient) bool {
+	probe := &http.Client{Timeout: 2 * time.Second}
+	resp, err := probe.Get(client.baseURL + "/api/languages")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode == http.StatusOK
+}
+
+// startEmbeddedServer runs the API in this process on a free loopback port and
+// returns its base URL. Server logging is discarded so it cannot scribble over
+// the board.
+func startEmbeddedServer() (string, error) {
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	log.SetOutput(io.Discard)
+	store.Init()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	srv := &http.Server{Handler: server.APIMux()}
+	go srv.Serve(ln)
+	return "http://" + ln.Addr().String(), nil
+}
+
 func promptLanguage(reader *bufio.Reader, client *apiClient) string {
 	for {
-		fmt.Print("Language (default: English, or 'list' to browse): ")
+		fmt.Print("Language (default: English, or 'list' to browse, 'quit' to exit): ")
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" {
 			return "English"
+		}
+		if strings.EqualFold(line, "quit") || strings.EqualFold(line, "exit") {
+			fmt.Println()
+			os.Exit(0)
 		}
 		if strings.EqualFold(line, "list") {
 			var langs languagesResp
@@ -148,7 +215,7 @@ func promptLanguage(reader *bufio.Reader, client *apiClient) string {
 				fmt.Printf("%sCould not fetch language list: %v%s\n", fgRed, err, reset)
 				continue
 			}
-			sort.Strings(langs.Languages)
+			slices.Sort(langs.Languages)
 			for i, l := range langs.Languages {
 				fmt.Printf("%-28s", l)
 				if (i+1)%3 == 0 {
@@ -162,9 +229,9 @@ func promptLanguage(reader *bufio.Reader, client *apiClient) string {
 	}
 }
 
-func startGame(client *apiClient, lang string) (*gameResp, error) {
+func startGame(client *apiClient, language string) (*gameResp, error) {
 	var g gameResp
-	if err := client.post("/api/game", map[string]string{"lang": lang}, &g); err != nil {
+	if err := client.post("/api/game", map[string]string{"lang": language}, &g); err != nil {
 		return nil, err
 	}
 	if g.Error != "" {
@@ -174,8 +241,11 @@ func startGame(client *apiClient, lang string) (*gameResp, error) {
 }
 
 func playGame(reader *bufio.Reader, client *apiClient, game *gameResp, history *[]string) {
-	fmt.Printf("\n%sNew game: %s, %d characters.%s Type a guess and press Enter (Up/Down for previous guesses, or 'quit').\n\n",
+	fmt.Printf("\n%sNew game: %s, %d characters.%s Type a guess and press Enter (Up/Down for previous guesses, 'chars' to reprint the character list, or 'quit').\n",
 		bold, game.Lang, game.WordLength, reset)
+	fmt.Printf("%s\n", legend())
+	printPasteChars(game)
+	fmt.Println()
 
 	for game.Status == "playing" {
 		word, ok := readLine(reader, history, "Guess: ")
@@ -187,6 +257,11 @@ func playGame(reader *bufio.Reader, client *apiClient, game *gameResp, history *
 		}
 		if strings.EqualFold(word, "quit") || strings.EqualFold(word, "exit") {
 			return
+		}
+		if strings.EqualFold(word, "chars") || strings.EqualFold(word, "keys") {
+			printPasteChars(game)
+			fmt.Println()
+			continue
 		}
 
 		var result guessResp
@@ -204,15 +279,76 @@ func playGame(reader *bufio.Reader, client *apiClient, game *gameResp, history *
 		fmt.Println()
 
 		game.Status = result.Status
-		if result.Status == "won" {
+		switch result.Status {
+		case "won":
 			fmt.Printf("%s%s%s\n", bold, result.Message, reset)
 			printReveal(&result)
 			printStats(client, game)
-		} else if result.Status == "lost" {
+		case "lost":
 			fmt.Printf("%s%s%s\n", bold, strings.ToUpper(result.Answer), reset)
 			printReveal(&result)
 			printStats(client, game)
 		}
+	}
+}
+
+// needsPaste reports whether a character has to be pasted rather than typed
+// on a US qwerty keyboard: it is not ASCII itself, and the game does not
+// accept its plain-ASCII form either. Guess matching is accent-insensitive
+// (lang.NormalizeChar), so é, ü and ư are all typeable as e, u and u and are
+// left out; ı, ø, æ, か and я have no ASCII form the game accepts, so they
+// are the ones worth listing.
+func needsPaste(ch string) bool {
+	return !isASCII(ch) && !isASCII(lang.NormalizeChar(ch))
+}
+
+func isASCII(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
+}
+
+// printPasteChars writes out every character of this game's keyboard that
+// cannot be typed on a US qwerty keyboard, row by row, so a player without
+// the language's keyboard layout installed can copy and paste them. Overflow
+// characters (the ones no layout key covers) get their own line: those are
+// typed as "*", but the literal character is accepted too.
+func printPasteChars(game *gameResp) {
+	var rows [][]string
+	for _, row := range game.KeyboardRows {
+		var out []string
+		for _, key := range row {
+			if needsPaste(key) {
+				out = append(out, key)
+			}
+		}
+		if len(out) > 0 {
+			rows = append(rows, out)
+		}
+	}
+
+	// The overflow bases stand for every alphabet character no keyboard key
+	// covers, so they are the only ones left to list.
+	var overflow []string
+	for _, base := range game.OverflowBase {
+		if needsPaste(base) {
+			overflow = append(overflow, base)
+		}
+	}
+
+	if len(rows) == 0 && len(overflow) == 0 {
+		return
+	}
+
+	fmt.Printf("%sNon-qwerty characters used:%s\n", dim, reset)
+	for _, row := range rows {
+		fmt.Printf("  %s\n", strings.Join(row, " "))
+	}
+	if len(overflow) > 0 {
+		fmt.Printf("  %s\"*\" for any of:%s %s\n", dim, reset, strings.Join(overflow, " "))
 	}
 }
 
@@ -233,10 +369,8 @@ func printRow(tiles, states []string, rtl bool) {
 }
 
 func reversed(in []string) []string {
-	out := make([]string, len(in))
-	for i, v := range in {
-		out[len(in)-1-i] = v
-	}
+	out := slices.Clone(in)
+	slices.Reverse(out)
 	return out
 }
 
@@ -244,11 +378,7 @@ func printKeyStates(keyStates map[string]string) {
 	if len(keyStates) == 0 {
 		return
 	}
-	keys := make([]string, 0, len(keyStates))
-	for k := range keyStates {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(keyStates))
 	fmt.Printf("%sLetters:%s ", dim, reset)
 	for _, k := range keys {
 		fmt.Printf("%s%s%s ", tileColor(keyStates[k]), strings.ToUpper(k), reset)
@@ -276,7 +406,11 @@ func printReveal(result *guessResp) {
 
 func printStats(client *apiClient, game *gameResp) {
 	var s statsResp
-	if err := client.get(fmt.Sprintf("/api/stats?lang=%s&length=%d", game.Lang, game.WordLength), &s); err != nil {
+	// The language goes through QueryEscape: names like "Chinese (Mandarin)"
+	// carry spaces and parentheses, which would otherwise make an invalid
+	// URL and leave stats silently unprinted.
+	path := fmt.Sprintf("/api/stats?lang=%s&length=%d", url.QueryEscape(game.Lang), game.WordLength)
+	if err := client.get(path, &s); err != nil {
 		return
 	}
 	fmt.Printf("\n%sStats for %s (%d): %d played, %d%% won, streak %d (max %d)%s\n",

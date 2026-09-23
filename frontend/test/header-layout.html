@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>header layout test</title>
+<link rel="stylesheet" href="../public/style.css" />
+<style>
+  /* Baseline: the header as it was before the language line was added. */
+  .baseline h1 {
+    grid-column: 2;
+    font-size: 1.7rem;
+    line-height: normal;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+</style>
+
+<div id="viewport">
+<header class="baseline" id="baseline">
+  <div class="header-btns"><button class="icon-btn">x</button></div>
+  <h1>Wordgo</h1>
+  <div class="header-btns"><button class="icon-btn">y</button></div>
+</header>
+
+<div id="cases"></div>
+</div>
+<pre id="results"></pre>
+
+<script>
+  // Longest names the language picker can realistically show, plus a
+  // deliberately over-long one as a stress case.
+  const LANGS = [
+    '',
+    'English',
+    'Korean (Hangul)',
+    'Assyrian Neo-Aramaic',
+    'Western Panjabi (Shahmukhi)',
+    'Southwestern Tarahumara',
+  ];
+
+  // ?width=N constrains the headers to that width: headless Chromium refuses
+  // window widths below 500px, so narrow layouts are simulated with a wrapper.
+  const wantWidth = Number(new URLSearchParams(location.search).get('width')) || 0;
+  if (wantWidth) document.getElementById('viewport').style.width = wantWidth + 'px';
+
+  const cases = document.getElementById('cases');
+  const built = LANGS.map(lang => {
+    const h = document.createElement('header');
+    h.innerHTML =
+      '<div class="header-btns"><button class="icon-btn">x</button></div>' +
+      '<div class="title-block"><h1>Wordgo</h1><p class="current-lang"></p></div>' +
+      '<div class="header-btns"><button class="icon-btn">y</button></div>';
+    h.querySelector('.current-lang').textContent = lang;
+    cases.appendChild(h);
+    return { lang, header: h };
+  });
+
+  const baselineHeight = document.getElementById('baseline').getBoundingClientRect().height;
+
+  const results = built.map(({ lang, header }) => {
+    const p = header.querySelector('.current-lang');
+    const box = p.getBoundingClientRect();
+    const headerBox = header.getBoundingClientRect();
+    return {
+      lang,
+      headerHeight: header.getBoundingClientRect().height,
+      // Text wider than its box means it is being cut off / ellipsised.
+      clippedX: p.scrollWidth > p.clientWidth + 1,
+      // Text taller than its box means a wrapped line is being cut off.
+      clippedY: p.scrollHeight > p.clientHeight + 1,
+      // Text escaping the header horizontally.
+      overflowsHeader: lang !== '' &&
+        (box.left < headerBox.left - 1 || box.right > headerBox.right + 1),
+      visible: lang === '' ? box.height === 0 : box.height > 0 && box.width > 0,
+    };
+  });
+
+  document.getElementById('results').textContent = JSON.stringify(
+    { viewport: document.getElementById('viewport').getBoundingClientRect().width, baselineHeight, results },
+    null,
+    2
+  );
+</script>

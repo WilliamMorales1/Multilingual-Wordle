@@ -2,6 +2,11 @@ backend/cache/
 frontend/node_modules/
 TODO.md
 backend/wordgo.db
+# WAL mode keeps two sidecar files next to the database.
+backend/wordgo.db-wal
+backend/wordgo.db-shm
 backend/wordgo.exe
 backend/wordgo
 frontend/public/script.js
+backend/test-logs/
+

@@ -1,9 +1,12 @@
 package wordlist
 
 import (
+	"encoding/binary"
 	"hash/fnv"
+	"log"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,46 +48,73 @@ const maxCachedWordLists = 50
 // Tracks in-flight word downloads: "lang:len" → count.
 var DownloadProgress sync.Map
 
-// Picks one word per UTC calendar day by hashing language/length,
+// DailyAnswer picks one word per UTC calendar day by hashing date, language
+// and length together. The length is part of the hash on purpose: the same
+// language played at two lengths should not land on the same index of two
+// different word lists.
+//
+// Returns "" for an empty word list rather than dividing by zero.
 func DailyAnswer(lng string, length int, words map[string]string) string {
-	keys := make([]string, 0, len(words))
-	for w := range words {
-		keys = append(keys, w)
+	if len(words) == 0 {
+		return ""
 	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(words))
 
 	h := fnv.New64a()
 	h.Write([]byte(time.Now().UTC().Format("2006-01-02")))
 	h.Write([]byte(lng))
+	h.Write(binary.BigEndian.AppendUint64(nil, uint64(length)))
 	idx := int(h.Sum64() % uint64(len(keys)))
 	return keys[idx]
 }
 
 func GetCachedWordList(lng string, length int) (map[string]string, error) {
-	key := Key{lng, length}
+	words, _, err := getOrLoad(lng, length)
+	return words, err
+}
 
-	wlCache.mu.RLock()
-	if e, ok := wlCache.entries[key]; ok {
-		wlCache.mu.RUnlock()
-		return e.words, nil
+// GetCachedWordListAuto loads a language's word list at its own median word
+// length, returning the length used. The median is measured the first time
+// the language is downloaded and remembered from then on.
+func GetCachedWordListAuto(lng string) (map[string]string, int, error) {
+	if length, ok := RecordedLength(lng); ok {
+		words, err := GetCachedWordList(lng, length)
+		return words, length, err
 	}
-	wlCache.mu.RUnlock()
+	return getOrLoad(lng, AutoLength)
+}
+
+// getOrLoad returns a lang/length's word list, loading and caching it if
+// needed. With AutoLength the length is picked from the language's median
+// word length; either way the length actually used is returned.
+func getOrLoad(lng string, length int) (map[string]string, int, error) {
+	if length != AutoLength {
+		wlCache.mu.RLock()
+		e, ok := wlCache.entries[Key{lng, length}]
+		wlCache.mu.RUnlock()
+		if ok {
+			return e.words, length, nil
+		}
+	}
 
 	// Double-checked locking: only one goroutine loads per key.
 	wlCache.loadMu.Lock()
 	defer wlCache.loadMu.Unlock()
 
-	wlCache.mu.RLock()
-	if e, ok := wlCache.entries[key]; ok {
+	if length != AutoLength {
+		wlCache.mu.RLock()
+		e, ok := wlCache.entries[Key{lng, length}]
 		wlCache.mu.RUnlock()
-		return e.words, nil
+		if ok {
+			return e.words, length, nil
+		}
 	}
-	wlCache.mu.RUnlock()
 
-	words, hanzi, etymology, err := loadWordList(lng, length)
+	words, hanzi, etymology, length, err := loadWordList(lng, length)
 	if err != nil {
-		return nil, err
+		return nil, length, err
 	}
+	key := Key{lng, length}
 
 	toneLang := lang.ToneSplitKind(lng)
 	normalized := lang.BuildNormalizedSet(words, toneLang)
@@ -103,7 +133,9 @@ func GetCachedWordList(lng string, length int) (map[string]string, error) {
 		normalized: normalized,
 		overflow:   overflowSet,
 	}
-	wlCache.order = append(wlCache.order, key)
+	if !slices.Contains(wlCache.order, key) {
+		wlCache.order = append(wlCache.order, key)
+	}
 	if len(wlCache.order) > maxCachedWordLists {
 		oldest := wlCache.order[0]
 		wlCache.order = wlCache.order[1:]
@@ -111,7 +143,7 @@ func GetCachedWordList(lng string, length int) (map[string]string, error) {
 	}
 	wlCache.mu.Unlock()
 
-	return words, nil
+	return words, length, nil
 }
 
 // nil if the language isn't a Chinese dialect or isn't cached yet.
@@ -160,10 +192,16 @@ func GetCachedOverflow(lng string, length int) map[string]bool {
 	return nil
 }
 
-var (
-	langCacheMu sync.RWMutex
-	langCache   []string
-)
+// languageIndex memoizes the kaikki.org language index (plus the Chinese
+// pseudo-languages). Only a *successful* fetch is memoized: getLanguages
+// returns nil on a network or parse error, and caching that would leave the
+// process permanently believing no language exists — every /api/game call
+// rejected as an unknown language until a restart. A failed fetch is simply
+// retried on the next call.
+var languageIndex struct {
+	mu    sync.Mutex
+	names []string
+}
 
 // ClearWordListCache evicts a single lang/length's cached word list, both in
 // memory and its on-disk JSON files, so a stale or corrupted entry can be
@@ -177,11 +215,8 @@ func ClearWordListCache(key Key) error {
 
 	wlCache.mu.Lock()
 	delete(wlCache.entries, key)
-	for i, k := range wlCache.order {
-		if k == key {
-			wlCache.order = append(wlCache.order[:i], wlCache.order[i+1:]...)
-			break
-		}
+	if i := slices.Index(wlCache.order, key); i >= 0 {
+		wlCache.order = slices.Delete(wlCache.order, i, i+1)
 	}
 	wlCache.mu.Unlock()
 
@@ -190,34 +225,32 @@ func ClearWordListCache(key Key) error {
 			return err
 		}
 	}
+	// Forget the measured length too, so the refresh re-measures the
+	// language rather than rebuilding at a length that may be why the list
+	// was cleared in the first place.
+	forgetMedianLength(key.Lang)
 	return nil
 }
 
 func GetCachedLanguages() []string {
-	langCacheMu.RLock()
-	if langCache != nil {
-		defer langCacheMu.RUnlock()
-		return langCache
-	}
-	langCacheMu.RUnlock()
-
-	langCacheMu.Lock()
-	defer langCacheMu.Unlock()
-
-	if langCache != nil {
-		return langCache
+	languageIndex.mu.Lock()
+	defer languageIndex.mu.Unlock()
+	if languageIndex.names != nil {
+		return languageIndex.names
 	}
 
 	langMap := getLanguages()
-	names := make([]string, 0, len(langMap)+len(chineseDialects))
-	for name := range langMap {
-		names = append(names, name)
+	if len(langMap) == 0 {
+		log.Printf("Warning: kaikki.org language index unavailable - will retry on the next request")
+		return nil
 	}
+
+	names := make([]string, 0, len(langMap)+len(chineseDialects))
+	names = append(names, slices.Collect(maps.Keys(langMap))...)
 	for _, d := range chineseDialects {
 		names = append(names, "Chinese ("+d+")")
 	}
-
-	sort.Strings(names)
-	langCache = names
+	slices.Sort(names)
+	languageIndex.names = names
 	return names
 }

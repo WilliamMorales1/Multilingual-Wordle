@@ -1,7 +1,7 @@
 import { S } from './state.js';
 import { api } from './api.js';
 import type { GuessResult, StatsResult } from './types.js';
-import { composeHangul } from './hangul.js';
+import { composeHangul, isHangulLang } from './hangul.js';
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,8 +38,13 @@ export function showEquivNotice(equivalences: string[][]): void {
 
 const STATE_EMOJI: Record<string, string> = { correct: '🟩', present: '🟨', absent: '⬛' };
 
+// Mirrors the backend's maxGuesses (api/handlers.go).
+const MAX_GUESSES = 6;
+
 function buildShareText(): string {
-  const n     = String(S.history.length);
+  // Wordle-style score: attempts out of the six a game allows, or X when the
+  // game was lost.
+  const n     = S.status === 'won' ? `${S.history.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
   const grid  = S.history.map(row => row.map(st => STATE_EMOJI[st] ?? '⬛').join('')).join('\n');
   return `Wordgo — ${S.lang} (${S.wordLength}) ${n}\n\n${grid}`;
 }
@@ -94,8 +99,8 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
       ? `${word} (${lastResult.answer_chars})`
       : word;
 
-    const isKorean = S.lang.startsWith('Korean');
-    const wiktTerm = lastResult.answer_chars || (isKorean ? composeHangul(lastResult.answer) : lastResult.answer);
+    const wiktTerm = lastResult.answer_chars ||
+      (isHangulLang(S.lang) ? composeHangul(lastResult.answer) : lastResult.answer);
     const wiktLangSection = S.lang.replace(/\s*\(.*\)\s*$/, '');
     const wiktLink = document.getElementById('defWiktionary') as HTMLAnchorElement;
     wiktLink.href = `https://en.wiktionary.org/wiki/${encodeURIComponent(wiktTerm)}#${encodeURIComponent(wiktLangSection)}`;
@@ -121,8 +126,10 @@ export async function showStats(lastResult: Partial<GuessResult> | null): Promis
     defEl.style.display = 'none';
   }
 
+  // A finished game is shareable either way — buildShareText already scores a
+  // loss as X/6, and hiding the button on a loss made that branch unreachable.
   const shareBtn = document.getElementById('shareBtn')!;
-  shareBtn.hidden = S.status !== 'won' || S.history.length === 0;
+  shareBtn.hidden = S.history.length === 0 || (S.status !== 'won' && S.status !== 'lost');
 
   openModal('statsModal');
 }

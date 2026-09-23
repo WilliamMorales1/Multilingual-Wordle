@@ -29,6 +29,8 @@ export const api = {
   newGame:   (b: NewGameRequest):         Promise<GameResult>      => apiFetch('/api/game', { method: 'POST', body: JSON.stringify(b) }),
   guess:     (id: number, word: string):  Promise<GuessResult>     => apiFetch(`/api/game/${id}/guess`, { method: 'POST', body: JSON.stringify({ word }) }),
   stats:     (lang: string, len: number): Promise<StatsResult>     => apiFetch(`/api/stats?lang=${encodeURIComponent(lang)}&length=${len}`),
-  progress:  (lang: string, len: number): Promise<ProgressResult>  => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}&length=${len}`),
+  // No length: an auto-length download only picks its length partway
+  // through, so the server tracks progress per language.
+  progress:  (lang: string):              Promise<ProgressResult>  => apiFetch(`/api/progress?lang=${encodeURIComponent(lang)}`),
   clearCache: (gameId: number | null, lang?: string): Promise<{ok: boolean}> => apiFetch('/api/cache/clear', { method: 'POST', body: JSON.stringify({ game_id: gameId ?? 0, lang: lang ?? '' }) }),
 };

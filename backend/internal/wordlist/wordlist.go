@@ -2,10 +2,13 @@ package wordlist
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,14 +18,40 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"unicode"
 
 	"golang.org/x/net/html"
 
 	"wordgo/internal/lang"
 )
 
+// permissiveJSON relaxes encoding/json/v2's two strictest defaults for data
+// we don't produce ourselves: kaikki.org's wiktextract dumps (and cache files
+// written by older builds) occasionally carry invalid UTF-8 or a repeated
+// object member, which v2 rejects outright. Since every decode site treats an
+// error as "skip this entry", the strict defaults would silently drop words
+// that the previous encoding/json decoder accepted.
+var permissiveJSON = json.JoinOptions(
+	jsontext.AllowInvalidUTF8(true),
+	jsontext.AllowDuplicateNames(true),
+)
+
 type KaikkiEntry struct {
-	Word          string               `json:"word"`
+	Word string `json:"word"`
+	// These lists are decoded only to be counted: a word Wiktionary bothers
+	// to translate, spin derived terms off, or cross-reference is a word
+	// people actually use (see medianWeight).
+	Translations    []struct{} `json:"translations"`
+	Derived         []struct{} `json:"derived"`
+	Synonyms        []struct{} `json:"synonyms"`
+	Related         []struct{} `json:"related"`
+	Descendants     []struct{} `json:"descendants"`
+	Antonyms        []struct{} `json:"antonyms"`
+	Hyponyms        []struct{} `json:"hyponyms"`
+	Hypernyms       []struct{} `json:"hypernyms"`
+	CoordinateTerms []struct{} `json:"coordinate_terms"`
+
 	Lang          string               `json:"lang"`
 	Pos           string               `json:"pos"`
 	Senses        []map[string]any     `json:"senses"`
@@ -46,6 +75,21 @@ var excludedSenseTags = map[string]bool{
 	"surnames":     true,
 }
 
+// senseTags returns a sense's tags, lowercased.
+func senseTags(sense map[string]any) []string {
+	raw, ok := sense["tags"].([]any)
+	if !ok {
+		return nil
+	}
+	tags := make([]string, 0, len(raw))
+	for _, t := range raw {
+		if tag, ok := t.(string); ok {
+			tags = append(tags, strings.ToLower(tag))
+		}
+	}
+	return tags
+}
+
 // isExcludedEntry reports whether an entry should be skipped because it (or
 // all of its senses) is tagged as a proper noun, given name, or surname.
 func isExcludedEntry(entry KaikkiEntry) bool {
@@ -53,16 +97,7 @@ func isExcludedEntry(entry KaikkiEntry) bool {
 		return true
 	}
 	for _, sense := range entry.Senses {
-		tags, ok := sense["tags"].([]any)
-		if !ok {
-			continue
-		}
-		for _, t := range tags {
-			tag, ok := t.(string)
-			if !ok {
-				continue
-			}
-			tag = strings.ToLower(tag)
+		for _, tag := range senseTags(sense) {
 			if excludedSenseTags[tag] {
 				return true
 			}
@@ -71,9 +106,158 @@ func isExcludedEntry(entry KaikkiEntry) bool {
 	return false
 }
 
+// rareSenseTags mark a sense nobody would think to guess. A word whose every
+// sense is one of these doesn't count toward the language's median word
+// length (English's dictionary is full of long obsolete words).
+var rareSenseTags = map[string]bool{
+	"obsolete":    true,
+	"archaic":     true,
+	"rare":        true,
+	"uncommon":    true,
+	"dated":       true,
+	"historical":  true,
+	"nonstandard": true,
+	"misspelling": true,
+	"poetic":      true,
+	"literary":    true,
+}
+
+// commonSenseTags mark a sense as everyday vocabulary. Wiktionary only tags
+// these occasionally, so they're a bonus on top of medianWeight's count,
+// never a requirement.
+var commonSenseTags = map[string]bool{
+	"common":     true,
+	"frequent":   true,
+	"frequently": true,
+}
+
+// commonWordWeight multiplies the weight of a word Wiktionary tags as common.
+const commonWordWeight = 3
+
+// inflectionTags mark an entry as a form of another word (conjugations,
+// plurals, abbreviations, alternative spellings) rather than a word in its
+// own right. Those aren't words to guess — the Spanish dump alone carries
+// every conjugation of every verb — so entries like these are skipped
+// outright, in every language.
+var inflectionTags = map[string]bool{
+	"form-of":      true,
+	"alt-of":       true,
+	"abbreviation": true,
+	"initialism":   true,
+	"acronym":      true,
+	"participle":   true,
+	"plural":       true,
+	"past":         true,
+	"comparative":  true,
+	"superlative":  true,
+}
+
+// isInflectedForm reports whether every one of an entry's senses just points
+// at another word, by tag or by an explicit form_of/alt_of reference. An
+// entry with one such sense among real ones (English "found", a verb of its
+// own as well as the past of "find") is kept.
+func isInflectedForm(entry KaikkiEntry) bool {
+	if len(entry.Senses) == 0 {
+		return false
+	}
+	for _, sense := range entry.Senses {
+		if _, ok := sense["form_of"]; ok {
+			continue
+		}
+		if _, ok := sense["alt_of"]; ok {
+			continue
+		}
+		inflection := false
+		for _, tag := range senseTags(sense) {
+			if inflectionTags[tag] {
+				inflection = true
+				break
+			}
+		}
+		if !inflection {
+			return false
+		}
+	}
+	return true
+}
+
+// crossReferences counts the entry lists that mark a word as widely used.
+func crossReferences(entry KaikkiEntry) int {
+	return len(entry.Translations) + len(entry.Derived) + len(entry.Synonyms) +
+		len(entry.Related) + len(entry.Descendants) + len(entry.Antonyms) +
+		len(entry.Hyponyms) + len(entry.Hypernyms) + len(entry.CoordinateTerms)
+}
+
+// medianWeight reports how much an entry counts toward its language's median
+// word length. Counting dictionary entries equally gives a median far longer
+// than the words anyone actually plays with — a dictionary is mostly long
+// technical terms and inflected forms — so each entry is weighted by how
+// much of a word it is in practice. The dumps carry no frequency data, so
+// the weight is built from what every language's entries do carry:
+//
+//   - one point for existing, plus one for each cross-reference (translation,
+//     derived term, synonym, antonym, descendant, hypernym…). Editors lavish
+//     these on everyday words and give a long technical term none.
+//     Deliberately uncapped: that long tail is the signal.
+//   - times the number of senses. A word people use all day accumulates
+//     senses; a single-sense entry is usually a technical one. This is what
+//     carries languages other than English, whose entries in the English
+//     Wiktionary are too sparse to cross-reference much (Spanish lists
+//     translations on ~0% of entries, against English's ~4%).
+//   - times commonWordWeight if a sense is tagged common.
+//   - zero if every sense is tagged rare/obsolete/etc. Those words still
+//     join the word list and stay guessable, they just don't sway the
+//     median. (Inflected forms never get this far — isInflectedForm drops
+//     them from the word list itself.)
+func medianWeight(entry KaikkiEntry) int {
+	weight := (1 + crossReferences(entry)) * max(1, len(entry.Senses))
+	allRare := len(entry.Senses) > 0
+	for _, sense := range entry.Senses {
+		rare := false
+		for _, tag := range senseTags(sense) {
+			if commonSenseTags[tag] {
+				return weight * commonWordWeight
+			}
+			if rareSenseTags[tag] {
+				rare = true
+			}
+		}
+		if !rare {
+			allRare = false
+		}
+	}
+	if allRare {
+		return 0
+	}
+	return weight
+}
+
 type KaikkiSound struct {
 	ZhPron string   `json:"zh_pron"`
 	Tags   []string `json:"tags"`
+}
+
+// unplayableLanguages are kaikki.org index entries the game hides. Each one
+// downloads fine but yields no word list anyone could play, so offering it
+// only buys the player a long download and an error.
+var unplayableLanguages = map[string]bool{
+	// Not a language: the concatenation of every dump kaikki publishes,
+	// tens of GB, and its file isn't even named after the entry.
+	"All languages combined": true,
+	// A jyutping pronunciation dump — every headword carries a tone digit
+	// ("cyun3"), which no keyboard layout here types. The playable Cantonese
+	// is "Chinese (Cantonese)", romanized off the Chinese dump.
+	"Cantonese": true,
+	// Tibetan-script, and almost entirely one- and two-syllable words: what
+	// is left above minAutoLength is written with the tsheg separator (་),
+	// which isn't a letter, so nothing survives.
+	"Kurtöp": true,
+	// Tangut script, a few hundred entries, one of them long enough to play.
+	"Tangut": true,
+	// A stub entry: 65 playable words in the whole dump, 15 at its fullest
+	// length. Norwegian's actual vocabulary is under "Norwegian Bokmål" and
+	// "Norwegian Nynorsk", both of which stay in the list.
+	"Norwegian": true,
 }
 
 // chineseDialects lists topolects exposed as "Chinese (X)" languages.
@@ -111,21 +295,31 @@ func zhuyinRomanize(entry KaikkiEntry) string {
 	return ""
 }
 
-// Strips the space/hyphen syllable separators and first tone space
+// Strips the space/hyphen syllable separators, keeping the bopomofo tone
+// marks (ˊ ˇ ˋ ˙) — a zhuyin IME types those as their own key, so they stay
+// as tiles. First tone is unmarked, as in the IME (its key is the spacebar).
 func zhuyinify(rom string) string {
 	return strings.Join(strings.FieldsFunc(rom, func(r rune) bool { return r == ' ' || r == '-' }), "")
 }
 
 // Extracts the dialect name from a "Chinese (X)" pseudo-language.
 func parseChineseDialect(lng string) (string, bool) {
-	if !strings.HasPrefix(lng, "Chinese (") || !strings.HasSuffix(lng, ")") {
+	inner, ok := strings.CutPrefix(lng, "Chinese (")
+	if !ok {
 		return "", false
 	}
-	d := strings.TrimSuffix(strings.TrimPrefix(lng, "Chinese ("), ")")
-	if d == "" {
+	d, ok := strings.CutSuffix(inner, ")")
+	if !ok || d == "" {
 		return "", false
 	}
 	return d, true
+}
+
+// The dumps hyphenate multi-word tags ("Min-Bei", "Min-Dong") while the
+// language names spell them with a space, so both are folded to one form
+// before comparing.
+func sameDialectTag(tag, dialect string) bool {
+	return strings.EqualFold(strings.ReplaceAll(tag, "-", " "), strings.ReplaceAll(dialect, "-", " "))
 }
 
 func romanizeEntry(entry KaikkiEntry, dialect string) string {
@@ -134,7 +328,7 @@ func romanizeEntry(entry KaikkiEntry, dialect string) string {
 			continue
 		}
 		for _, t := range s.Tags {
-			if strings.EqualFold(t, dialect) {
+			if sameDialectTag(t, dialect) {
 				return s.ZhPron
 			}
 		}
@@ -142,9 +336,17 @@ func romanizeEntry(entry KaikkiEntry, dialect string) string {
 	return ""
 }
 
-// Directory uses %20 for spaces; filename has spaces stripped entirely.
+// Directory uses %20 for spaces; the filename drops every character that
+// isn't a letter or a digit — not just spaces, but the hyphens, apostrophes
+// and parentheses in names like "Proto-Slavic", "Ge'ez" and "Yao (Africa)".
+// Accented letters stay ("Franco-Provençal" -> "FrancoProvençal").
 func kaikkiURL(lng string) string {
-	slug := strings.ReplaceAll(lng, " ", "")
+	slug := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, lng)
 	u := &url.URL{
 		Scheme: "https",
 		Host:   "kaikki.org",
@@ -254,7 +456,7 @@ var cangjieLetterGlyphs = map[byte]string{
 // ASCII codes to Cangjie root-glyph codes
 func cangjieGlyphsFromCode(code string) string {
 	var b strings.Builder
-	for i := 0; i < len(code); i++ {
+	for i := range len(code) {
 		glyph, ok := cangjieLetterGlyphs[code[i]]
 		if !ok {
 			return ""
@@ -307,7 +509,7 @@ func loadCangjieTable() (map[string]string, error) {
 	cf := cangjieTableCachePath()
 	if data, err := os.ReadFile(cf); err == nil {
 		var cached map[string]string
-		if err := json.Unmarshal(data, &cached); err == nil && len(cached) > 0 {
+		if err := json.Unmarshal(data, &cached, permissiveJSON); err == nil && len(cached) > 0 {
 			return cached, nil
 		}
 	}
@@ -333,7 +535,7 @@ func loadCangjieTable() (map[string]string, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		var entry KaikkiEntry
-		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
+		if json.Unmarshal(scanner.Bytes(), &entry, permissiveJSON) != nil {
 			continue
 		}
 		if entry.Lang != "Translingual" || entry.Pos != "character" || len([]rune(entry.Word)) != 1 {
@@ -359,7 +561,9 @@ func loadCangjieTable() (map[string]string, error) {
 	return table, nil
 }
 
-func cangjieToChar(hanzi string, table map[string]string) string {
+// cangjieCodeForChar returns a single hanzi's Cangjie root-glyph code
+// (e.g. "好" -> "女弓木"), or "" if the table doesn't cover it.
+func cangjieCodeForChar(hanzi string, table map[string]string) string {
 	if len([]rune(hanzi)) != 1 {
 		return ""
 	}
@@ -370,29 +574,97 @@ func cangjieToChar(hanzi string, table map[string]string) string {
 	return code
 }
 
+// AutoLength asks streamURL to pick the word length from the language's own
+// median word length instead of filtering to a length chosen up front.
+const AutoLength = 0
+
+// Bounds on an auto-picked length: below 3 tiles a word carries too little
+// information to guess, above 12 the board stops fitting on a phone. Words
+// outside this range are dropped as they're parsed - they can never be the
+// answer, so they're never buffered, measured or cached.
+const (
+	minAutoLength = 3
+	maxAutoLength = 12
+)
+
+// minWordListSize is the smallest word list a language can be played with.
+const minWordListSize = 20
+
+// medianLengthSample is how many words are buffered to take the median of
+// before committing to a length. Large enough that the median is stable,
+// small enough that the buffer stays a few tens of MB on a big language; a
+// language with fewer words than this takes the median of all of them.
+const medianLengthSample = 100000
+
+// pickAutoLength returns a language's median word length — weights maps a
+// tile count to the total weight of the words that long, so a common word
+// counts for several ordinary ones. The median ignores outliers by
+// construction: however long a language's longest words get, they only ever
+// move it one word at a time.
+func pickAutoLength(weights map[int]int) int {
+	total := 0
+	for _, w := range weights {
+		total += w
+	}
+	if total == 0 {
+		return minAutoLength
+	}
+
+	// The median sits at weight position (total-1)/2, counting from 0.
+	half, seen := (total-1)/2, 0
+	for _, length := range slices.Sorted(maps.Keys(weights)) {
+		seen += weights[length]
+		if seen > half {
+			return min(max(length, minAutoLength), maxAutoLength)
+		}
+	}
+	return maxAutoLength
+}
+
+// fullestLength returns the tile count with the most words behind it,
+// preferring the shorter one when two are tied.
+func fullestLength(counts map[int]int) int {
+	best := 0
+	for _, length := range slices.Sorted(maps.Keys(counts)) {
+		if counts[length] > counts[best] {
+			best = length
+		}
+	}
+	return best
+}
+
 // Parsing is parallelised across CPU workers while the scanner streams the download.
-func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, error) {
+// length is the tile count to keep, or AutoLength to take the median of the
+// language's words and keep that length; the length actually used is returned.
+func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, int, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, length, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, nil, nil, length, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, length, err
 	}
 	defer gz.Close()
 
 	// kanjiDef marks side-table entries: kanji lemma defs keyed by kana reading.
 	type result struct {
 		word, def, hanzi, etymology string
+		tiles                       int
+		weight                      int // how much it counts toward the average length
 		kanjiDef                    bool
 	}
+
+	// chosenLen is the length workers filter on. In auto mode it stays 0
+	// until the collector has averaged enough words to commit to one.
+	var chosenLen atomic.Int64
+	chosenLen.Store(int64(length))
 
 	isJP := lang.IsJapaneseLang(lng)
 
@@ -405,15 +677,15 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		wg.Go(func() {
 			for line := range lines {
 				var entry KaikkiEntry
-				if json.Unmarshal(line, &entry) != nil {
+				if json.Unmarshal(line, &entry, permissiveJSON) != nil {
 					continue
 				}
-				if entry.Lang != lng || len(entry.Senses) == 0 || isExcludedEntry(entry) {
+				if entry.Lang != lng || len(entry.Senses) == 0 || isExcludedEntry(entry) || isInflectedForm(entry) {
 					continue
 				}
 				var word, hanzi string
 				if dialect == cangjieDialect {
-					word = cangjieToChar(entry.Word, cangjieTable)
+					word = cangjieCodeForChar(entry.Word, cangjieTable)
 					if word == "" {
 						continue
 					}
@@ -433,7 +705,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 					if rom == "" {
 						continue
 					}
-					word = lang.ChineseToneify(dialect, strings.ToLower(rom))
+					word = lang.ChineseRomanize(dialect, strings.ToLower(rom))
 					if word == "" {
 						continue
 					}
@@ -451,7 +723,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 							// Not a playable kana word, but may be a kanji lemma whose
 							// kana reading matches a word in the list. Key the side-table
 							// by the kana reading (from head_templates[0].args["1"])
-							// This is so, for example, 辛い(からい)="spicy" and 辛い(つらい)="painful" 
+							// This is so, for example, 辛い(からい)="spicy" and 辛い(つらい)="painful"
 							// are kept separately and looked up by the exact hiragana form.
 							if gloss := firstGloss(entry); gloss != "" {
 								reading := ""
@@ -478,7 +750,15 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 						word = entry.Word
 					}
 				}
-				if !lang.IsValid(word, length, toneLang) {
+				if !lang.IsWord(word) {
+					continue
+				}
+				tiles := lang.WordLen(word, toneLang)
+				if want := int(chosenLen.Load()); want != AutoLength {
+					if tiles != want {
+						continue
+					}
+				} else if tiles < minAutoLength || tiles > maxAutoLength {
 					continue
 				}
 				results <- result{
@@ -486,6 +766,8 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 					def:       firstGloss(entry),
 					hanzi:     hanzi,
 					etymology: entry.Etymology,
+					tiles:     tiles,
+					weight:    medianWeight(entry),
 				}
 			}
 		})
@@ -502,9 +784,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		scanner := bufio.NewScanner(gz)
 		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for scanner.Scan() {
-			b := make([]byte, len(scanner.Bytes()))
-			copy(b, scanner.Bytes())
-			lines <- b
+			lines <- bytes.Clone(scanner.Bytes())
 		}
 		scanErr = scanner.Err()
 	}()
@@ -518,13 +798,8 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	// kanjiDefs maps kana reading -> definition for kanji entries, keyed by reading
 	// so that homograph kanji (e.g. 辛い read as からい vs つらい) stay separate.
 	kanjiDefs := make(map[string]string)
-	for r := range results {
-		if r.kanjiDef {
-			if _, exists := kanjiDefs[r.word]; !exists {
-				kanjiDefs[r.word] = r.def
-			}
-			continue
-		}
+
+	add := func(r result) {
 		_, existed := words[r.word]
 		if !existed {
 			words[r.word] = ""
@@ -537,13 +812,87 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 			if hanziMap != nil {
 				hanziMap[r.word] = r.hanzi
 			}
-		}
-		if len(words)%500 == 0 {
-			log.Printf("  %d words collected...", len(words))
-			if onProgress != nil {
-				onProgress(len(words))
+			// Only a new word moves the counter. Logging on every add would
+			// repeat the same line for each extra definition landing on an
+			// already-known word while the count sits on a multiple of 500.
+			if len(words)%500 == 0 {
+				log.Printf("  %d words collected...", len(words))
+				if onProgress != nil {
+					onProgress(len(words))
+				}
 			}
 		}
+	}
+
+	// In auto mode words of every playable length are buffered until there
+	// are enough to measure; their median then fixes the length, the buffer
+	// is replayed keeping only that length, and the workers filter the rest
+	// of the stream themselves.
+	var buffered []result
+	sampled, totalWeight := 0, 0
+	weights := make(map[int]int)    // tile count -> weight of the words that long
+	unweighted := make(map[int]int) // same, counting every word once
+	commit := func() {
+		if totalWeight > 0 {
+			length = pickAutoLength(weights)
+		} else {
+			// Every sampled word was tagged rare (or the language tags no
+			// senses at all) - fall back to counting them all equally.
+			length = pickAutoLength(unweighted)
+		}
+		if sampled > 0 {
+			log.Printf("%s: median of %d words (weighted by how widely used each is) is %d tiles",
+				lng, sampled, length)
+		}
+		// On a thin language the median can land on a length with barely a
+		// word in it (Norwegian's median is 7 tiles, and it has eight such
+		// words - most Norwegian entries live under Bokmål and Nynorsk).
+		// Play its biggest bucket instead. Only worth doing when the whole
+		// dump fit in the sample: past that the counts are a prefix of the
+		// stream, and the median's own bucket keeps growing anyway.
+		if sampled < medianLengthSample && unweighted[length] < minWordListSize {
+			if best := fullestLength(unweighted); unweighted[best] > unweighted[length] {
+				log.Printf("%s: only %d words that long - playing %d tiles instead (%d words)",
+					lng, unweighted[length], best, unweighted[best])
+				length = best
+			}
+		}
+		chosenLen.Store(int64(length))
+		for _, b := range buffered {
+			if b.tiles == length {
+				add(b)
+			}
+		}
+		buffered = nil
+	}
+
+	for r := range results {
+		if r.kanjiDef {
+			if _, exists := kanjiDefs[r.word]; !exists {
+				kanjiDefs[r.word] = r.def
+			}
+			continue
+		}
+		if length == AutoLength {
+			buffered = append(buffered, r)
+			weights[r.tiles] += r.weight
+			totalWeight += r.weight
+			unweighted[r.tiles]++
+			sampled++
+			if sampled >= medianLengthSample {
+				commit()
+			}
+			continue
+		}
+		// A worker may still be holding a word from before the length was
+		// committed, so re-check here.
+		if r.tiles != length {
+			continue
+		}
+		add(r)
+	}
+	if length == AutoLength {
+		commit()
 	}
 	// Fill in definitions for Japanese kana words that had no gloss of their own
 	// by looking up the kanji lemma's definition keyed by this exact kana reading.
@@ -558,31 +907,22 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 	if scanErr != nil {
 		if len(words) >= 20 {
 			log.Printf("Warning: scanner error after %d words (%v) - using partial results", len(words), scanErr)
-			return words, hanziMap, etymology, nil
+			return words, hanziMap, etymology, length, nil
 		}
-		return nil, nil, nil, scanErr
+		return nil, nil, nil, length, scanErr
 	}
-	return words, hanziMap, etymology, nil
+	return words, hanziMap, etymology, length, nil
 }
 
-func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, error) {
-	cf := cacheFilePath(lng, length, "")
-	hcf := cacheFilePath(lng, length, "_hanzi")
-	ecf := cacheFilePath(lng, length, "_etymology")
-
-	if data, err := os.ReadFile(cf); err == nil {
-		var cached map[string]string
-		if err := json.Unmarshal(data, &cached); err == nil && len(cached) >= 20 {
-			log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lng, length, filepath.Base(cf))
-			var hanzi map[string]string
-			if hdata, err := os.ReadFile(hcf); err == nil {
-				json.Unmarshal(hdata, &hanzi)
-			}
-			var etymology map[string]string
-			if edata, err := os.ReadFile(ecf); err == nil {
-				json.Unmarshal(edata, &etymology)
-			}
-			return cached, hanzi, etymology, nil
+// loadWordList returns the word list for lng at the given length, or — with
+// AutoLength — at the language's own median word length, which it returns.
+func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, int, error) {
+	// streamURL overwrites length in auto mode, so remember what was asked
+	// for: only a measured length is worth recording.
+	requested := length
+	if length != AutoLength {
+		if words, hanzi, etymology, ok := loadCachedWordList(lng, length); ok {
+			return words, hanzi, etymology, length, nil
 		}
 	}
 
@@ -598,7 +938,7 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 		var err error
 		cangjieTable, err = loadCangjieTable()
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, length, err
 		}
 	}
 
@@ -607,22 +947,41 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 
 	toneLang := lang.ToneSplitKind(lng)
 
-	key := fmt.Sprintf("%s:%d", lng, length)
-	words, hanzi, etymology, err := streamURL(u, matchLang, dialect, length, toneLang, cangjieTable, func(n int) {
-		DownloadProgress.Store(key, n)
+	// Keyed by language alone: with AutoLength the length isn't known until
+	// partway through the download, and a progress poll can't name it.
+	words, hanzi, etymology, length, err := streamURL(u, matchLang, dialect, length, toneLang, cangjieTable, func(n int) {
+		DownloadProgress.Store(lng, n)
 	})
-	DownloadProgress.Delete(key)
+	DownloadProgress.Delete(lng)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return nil, nil, nil, fmt.Errorf("language %q not found on kaikki.org - check /api/languages for valid names", lng)
+			return nil, nil, nil, length, fmt.Errorf("language %q not found on kaikki.org - check /api/languages for valid names", lng)
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, length, err
 	}
-	if len(words) == 0 {
-		return nil, nil, nil, fmt.Errorf("no %d-character %s words found", length, lng)
+	if len(words) < minWordListSize {
+		// Not just "none found": a handful of words is a list nobody can
+		// play — the answer is most of it, so there is nothing to guess
+		// with. Same threshold loadCachedWordList uses to decide a cache
+		// file is too thin to bother with.
+		if requested != AutoLength {
+			// A remembered median that no longer holds enough words (or a
+			// length the caller picked itself). Drop it and re-measure,
+			// which lands on the language's fullest length instead.
+			log.Printf("%s has only %d playable %d-character words - re-measuring its word length", lng, len(words), length)
+			forgetMedianLength(lng)
+			return loadWordList(lng, AutoLength)
+		}
+		return nil, nil, nil, length, fmt.Errorf("%s has only %d playable %d-character words - not enough for a game",
+			lng, len(words), length)
 	}
+	recordMeasuredLength(lng, requested, length)
 
 	log.Printf("%d %s %d-letter words collected", len(words), lng, length)
+
+	cf := cacheFilePath(lng, length, "")
+	hcf := cacheFilePath(lng, length, "_hanzi")
+	ecf := cacheFilePath(lng, length, "_etymology")
 
 	if data, err := json.Marshal(words); err == nil {
 		if err := os.WriteFile(cf, data, 0644); err == nil {
@@ -643,7 +1002,43 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 			}
 		}
 	}
-	return words, hanzi, etymology, nil
+	return words, hanzi, etymology, length, nil
+}
+
+// recordMeasuredLength remembers a language's word length, but only when the
+// load actually measured one. A caller that asked for a specific length has
+// measured nothing, and recording its choice would overwrite the language's
+// median — and with it the length every later game is created at.
+func recordMeasuredLength(lng string, requested, measured int) {
+	if requested != AutoLength {
+		return
+	}
+	recordMedianLength(lng, measured)
+}
+
+// loadCachedWordList reads a lang/length's word list off disk, reporting
+// whether a usable one was there.
+func loadCachedWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, bool) {
+	cf := cacheFilePath(lng, length, "")
+	data, err := os.ReadFile(cf)
+	if err != nil {
+		return nil, nil, nil, false
+	}
+	var cached map[string]string
+	if err := json.Unmarshal(data, &cached, permissiveJSON); err != nil || len(cached) < minWordListSize {
+		return nil, nil, nil, false
+	}
+	log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lng, length, filepath.Base(cf))
+
+	var hanzi map[string]string
+	if hdata, err := os.ReadFile(cacheFilePath(lng, length, "_hanzi")); err == nil {
+		json.Unmarshal(hdata, &hanzi, permissiveJSON)
+	}
+	var etymology map[string]string
+	if edata, err := os.ReadFile(cacheFilePath(lng, length, "_etymology")); err == nil {
+		json.Unmarshal(edata, &etymology, permissiveJSON)
+	}
+	return cached, hanzi, etymology, true
 }
 
 func getLanguages() map[string]string {
@@ -676,7 +1071,7 @@ func getLanguages() map[string]string {
 					if err != nil {
 						break
 					}
-					if !strings.Contains(decoded, ".") {
+					if !strings.Contains(decoded, ".") && !unplayableLanguages[decoded] {
 						languages[decoded] = attr.Val
 					}
 					break
