@@ -23,26 +23,24 @@ const medianLengthFile = "avg_lengths.json"
 var medianLengths = struct {
 	sync.RWMutex
 	byLang map[string]int
-	once   sync.Once
 }{}
 
 func medianLengthPath() string { return filepath.Join(cacheDir(), medianLengthFile) }
 
-func loadMedianLengths() {
-	medianLengths.once.Do(func() {
-		medianLengths.Lock()
-		defer medianLengths.Unlock()
+// loadMedianLengths reads the measurements off disk, once per process.
+var loadMedianLengths = sync.OnceFunc(func() {
+	medianLengths.Lock()
+	defer medianLengths.Unlock()
+	medianLengths.byLang = make(map[string]int)
+	data, err := os.ReadFile(medianLengthPath())
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(data, &medianLengths.byLang); err != nil {
+		log.Printf("Warning: failed to parse %s: %v", medianLengthPath(), err)
 		medianLengths.byLang = make(map[string]int)
-		data, err := os.ReadFile(medianLengthPath())
-		if err != nil {
-			return
-		}
-		if err := json.Unmarshal(data, &medianLengths.byLang); err != nil {
-			log.Printf("Warning: failed to parse %s: %v", medianLengthPath(), err)
-			medianLengths.byLang = make(map[string]int)
-		}
-	})
-}
+	}
+})
 
 // RecordedLength returns the length a language's word list was last built at.
 func RecordedLength(lng string) (int, bool) {

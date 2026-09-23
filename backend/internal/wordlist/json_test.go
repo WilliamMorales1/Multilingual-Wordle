@@ -187,3 +187,36 @@ func TestIsInflectedForm(t *testing.T) {
 		})
 	}
 }
+
+func TestIsObsoleteEntry(t *testing.T) {
+	sense := func(tags ...string) map[string]any {
+		s := map[string]any{}
+		if len(tags) > 0 {
+			raw := make([]any, len(tags))
+			for i, tag := range tags {
+				raw[i] = tag
+			}
+			s["tags"] = raw
+		}
+		return s
+	}
+	cases := []struct {
+		name  string
+		entry KaikkiEntry
+		want  bool
+	}{
+		{"every sense obsolete", KaikkiEntry{Senses: []map[string]any{sense("obsolete"), sense("archaic", "poetic")}}, true},
+		{"historical only", KaikkiEntry{Senses: []map[string]any{sense("historical")}}, true},
+		{"one live sense keeps it", KaikkiEntry{Senses: []map[string]any{sense("obsolete"), sense("slang")}}, false},
+		{"untagged sense keeps it", KaikkiEntry{Senses: []map[string]any{sense("archaic"), sense()}}, false},
+		{"merely rare is not obsolete", KaikkiEntry{Senses: []map[string]any{sense("rare"), sense("dated", "literary")}}, false},
+		{"no senses", KaikkiEntry{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isObsoleteEntry(c.entry); got != c.want {
+				t.Errorf("isObsoleteEntry = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

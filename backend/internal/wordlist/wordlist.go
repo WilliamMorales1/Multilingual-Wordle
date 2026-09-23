@@ -122,6 +122,40 @@ var rareSenseTags = map[string]bool{
 	"literary":    true,
 }
 
+// obsoleteSenseTags mark a sense as a word no living speaker uses: it is
+// only found in old texts. A word whose every sense is tagged this way is
+// still accepted as a guess, but is never picked as the answer (see
+// isObsoleteEntry and DailyAnswer) — a daily word nobody could know is a
+// day wasted. Narrower than rareSenseTags on purpose: "rare" or "literary"
+// words are still current, they just don't come up often.
+var obsoleteSenseTags = map[string]bool{
+	"obsolete":   true,
+	"archaic":    true,
+	"historical": true,
+}
+
+// isObsoleteEntry reports whether every one of an entry's senses is tagged
+// obsolete/archaic/historical. One live sense among them keeps the whole
+// entry playable.
+func isObsoleteEntry(entry KaikkiEntry) bool {
+	if len(entry.Senses) == 0 {
+		return false
+	}
+	for _, sense := range entry.Senses {
+		obsolete := false
+		for _, tag := range senseTags(sense) {
+			if obsoleteSenseTags[tag] {
+				obsolete = true
+				break
+			}
+		}
+		if !obsolete {
+			return false
+		}
+	}
+	return true
+}
+
 // commonSenseTags mark a sense as everyday vocabulary. Wiktionary only tags
 // these occasionally, so they're a bonus on top of medianWeight's count,
 // never a requirement.
@@ -636,20 +670,29 @@ func fullestLength(counts map[int]int) int {
 // Parsing is parallelised across CPU workers while the scanner streams the download.
 // length is the tile count to keep, or AutoLength to take the median of the
 // language's words and keep that length; the length actually used is returned.
-func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (map[string]string, map[string]string, map[string]string, int, error) {
+// wordData is everything a word list load produces: the words themselves
+// (word→definition) plus the side tables keyed by the same words.
+type wordData struct {
+	words     map[string]string // word→definition
+	hanzi     map[string]string // romanized word→hanzi (Chinese dialects only)
+	etymology map[string]string // word→etymology text
+	obsolete  map[string]bool   // word→every sense of it is obsolete
+}
+
+func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjieTable map[string]string, onProgress func(int)) (*wordData, int, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
-		return nil, nil, nil, length, err
+		return nil, length, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, nil, length, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, length, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return nil, nil, nil, length, err
+		return nil, length, err
 	}
 	defer gz.Close()
 
@@ -659,6 +702,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		tiles                       int
 		weight                      int // how much it counts toward the average length
 		kanjiDef                    bool
+		obsolete                    bool // every sense of it is obsolete/archaic/historical
 	}
 
 	// chosenLen is the length workers filter on. In auto mode it stays 0
@@ -768,6 +812,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 					etymology: entry.Etymology,
 					tiles:     tiles,
 					weight:    medianWeight(entry),
+					obsolete:  isObsoleteEntry(entry),
 				}
 			}
 		})
@@ -791,6 +836,7 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 
 	words := make(map[string]string)
 	etymology := make(map[string]string)
+	obsolete := make(map[string]bool)
 	var hanziMap map[string]string
 	if dialect != "" {
 		hanziMap = make(map[string]string)
@@ -803,6 +849,10 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		_, existed := words[r.word]
 		if !existed {
 			words[r.word] = ""
+			obsolete[r.word] = r.obsolete
+		} else if !r.obsolete {
+			// A homograph with a live sense makes the word playable again.
+			obsolete[r.word] = false
 		}
 		addDef(words, r.word, r.def)
 		if !existed {
@@ -904,25 +954,27 @@ func streamURL(rawURL, lng, dialect string, length int, toneLang string, cangjie
 		}
 	}
 
+	data := &wordData{words: words, hanzi: hanziMap, etymology: etymology, obsolete: obsolete}
+
 	if scanErr != nil {
 		if len(words) >= 20 {
 			log.Printf("Warning: scanner error after %d words (%v) - using partial results", len(words), scanErr)
-			return words, hanziMap, etymology, length, nil
+			return data, length, nil
 		}
-		return nil, nil, nil, length, scanErr
+		return nil, length, scanErr
 	}
-	return words, hanziMap, etymology, length, nil
+	return data, length, nil
 }
 
 // loadWordList returns the word list for lng at the given length, or — with
 // AutoLength — at the language's own median word length, which it returns.
-func loadWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, int, error) {
+func loadWordList(lng string, length int) (*wordData, int, error) {
 	// streamURL overwrites length in auto mode, so remember what was asked
 	// for: only a measured length is worth recording.
 	requested := length
 	if length != AutoLength {
-		if words, hanzi, etymology, ok := loadCachedWordList(lng, length); ok {
-			return words, hanzi, etymology, length, nil
+		if data, ok := loadCachedWordList(lng, length); ok {
+			return data, length, nil
 		}
 	}
 
@@ -938,7 +990,7 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 		var err error
 		cangjieTable, err = loadCangjieTable()
 		if err != nil {
-			return nil, nil, nil, length, err
+			return nil, length, err
 		}
 	}
 
@@ -949,17 +1001,17 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 
 	// Keyed by language alone: with AutoLength the length isn't known until
 	// partway through the download, and a progress poll can't name it.
-	words, hanzi, etymology, length, err := streamURL(u, matchLang, dialect, length, toneLang, cangjieTable, func(n int) {
+	data, length, err := streamURL(u, matchLang, dialect, length, toneLang, cangjieTable, func(n int) {
 		DownloadProgress.Store(lng, n)
 	})
 	DownloadProgress.Delete(lng)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return nil, nil, nil, length, fmt.Errorf("language %q not found on kaikki.org - check /api/languages for valid names", lng)
+			return nil, length, fmt.Errorf("language %q not found on kaikki.org - check /api/languages for valid names", lng)
 		}
-		return nil, nil, nil, length, err
+		return nil, length, err
 	}
-	if len(words) < minWordListSize {
+	if len(data.words) < minWordListSize {
 		// Not just "none found": a handful of words is a list nobody can
 		// play — the answer is most of it, so there is nothing to guess
 		// with. Same threshold loadCachedWordList uses to decide a cache
@@ -968,41 +1020,63 @@ func loadWordList(lng string, length int) (map[string]string, map[string]string,
 			// A remembered median that no longer holds enough words (or a
 			// length the caller picked itself). Drop it and re-measure,
 			// which lands on the language's fullest length instead.
-			log.Printf("%s has only %d playable %d-character words - re-measuring its word length", lng, len(words), length)
+			log.Printf("%s has only %d playable %d-character words - re-measuring its word length", lng, len(data.words), length)
 			forgetMedianLength(lng)
 			return loadWordList(lng, AutoLength)
 		}
-		return nil, nil, nil, length, fmt.Errorf("%s has only %d playable %d-character words - not enough for a game",
-			lng, len(words), length)
+		return nil, length, fmt.Errorf("%s has only %d playable %d-character words - not enough for a game",
+			lng, len(data.words), length)
 	}
 	recordMeasuredLength(lng, requested, length)
 
-	log.Printf("%d %s %d-letter words collected", len(words), lng, length)
+	log.Printf("%d %s %d-letter words collected", len(data.words), lng, length)
 
 	cf := cacheFilePath(lng, length, "")
 	hcf := cacheFilePath(lng, length, "_hanzi")
 	ecf := cacheFilePath(lng, length, "_etymology")
+	ocf := cacheFilePath(lng, length, "_obsolete")
 
-	if data, err := json.Marshal(words); err == nil {
-		if err := os.WriteFile(cf, data, 0644); err == nil {
+	if raw, err := json.Marshal(data.words); err == nil {
+		if err := os.WriteFile(cf, raw, 0644); err == nil {
 			log.Printf("Cached at %s", cf)
 		}
 	}
-	if hanzi != nil {
-		if data, err := json.Marshal(hanzi); err == nil {
-			if err := os.WriteFile(hcf, data, 0644); err != nil {
+	if data.hanzi != nil {
+		if raw, err := json.Marshal(data.hanzi); err == nil {
+			if err := os.WriteFile(hcf, raw, 0644); err != nil {
 				log.Printf("Warning: failed to write hanzi cache %s: %v", hcf, err)
 			}
 		}
 	}
-	if len(etymology) > 0 {
-		if data, err := json.Marshal(etymology); err == nil {
-			if err := os.WriteFile(ecf, data, 0644); err != nil {
+	if len(data.etymology) > 0 {
+		if raw, err := json.Marshal(data.etymology); err == nil {
+			if err := os.WriteFile(ecf, raw, 0644); err != nil {
 				log.Printf("Warning: failed to write etymology cache %s: %v", ecf, err)
 			}
 		}
 	}
-	return words, hanzi, etymology, length, nil
+	// Stored as a sorted word list rather than a map: it is a set, and on a
+	// language with few obsolete words the file stays tiny.
+	if obsolete := obsoleteWords(data.obsolete); len(obsolete) > 0 {
+		if raw, err := json.Marshal(obsolete); err == nil {
+			if err := os.WriteFile(ocf, raw, 0644); err != nil {
+				log.Printf("Warning: failed to write obsolete-word cache %s: %v", ocf, err)
+			}
+		}
+	}
+	return data, length, nil
+}
+
+// obsoleteWords returns the words flagged obsolete, sorted, for the cache file.
+func obsoleteWords(flags map[string]bool) []string {
+	words := make([]string, 0, len(flags))
+	for word, obsolete := range flags {
+		if obsolete {
+			words = append(words, word)
+		}
+	}
+	slices.Sort(words)
+	return words
 }
 
 // recordMeasuredLength remembers a language's word length, but only when the
@@ -1018,15 +1092,15 @@ func recordMeasuredLength(lng string, requested, measured int) {
 
 // loadCachedWordList reads a lang/length's word list off disk, reporting
 // whether a usable one was there.
-func loadCachedWordList(lng string, length int) (map[string]string, map[string]string, map[string]string, bool) {
+func loadCachedWordList(lng string, length int) (*wordData, bool) {
 	cf := cacheFilePath(lng, length, "")
-	data, err := os.ReadFile(cf)
+	raw, err := os.ReadFile(cf)
 	if err != nil {
-		return nil, nil, nil, false
+		return nil, false
 	}
 	var cached map[string]string
-	if err := json.Unmarshal(data, &cached, permissiveJSON); err != nil || len(cached) < minWordListSize {
-		return nil, nil, nil, false
+	if err := json.Unmarshal(raw, &cached, permissiveJSON); err != nil || len(cached) < minWordListSize {
+		return nil, false
 	}
 	log.Printf("Loaded %d %s %d-letter words from cache (%s)", len(cached), lng, length, filepath.Base(cf))
 
@@ -1038,7 +1112,18 @@ func loadCachedWordList(lng string, length int) (map[string]string, map[string]s
 	if edata, err := os.ReadFile(cacheFilePath(lng, length, "_etymology")); err == nil {
 		json.Unmarshal(edata, &etymology, permissiveJSON)
 	}
-	return cached, hanzi, etymology, true
+	// Missing on caches written before obsolete words were tracked: those
+	// lists just keep every word answerable until they're downloaded again.
+	obsolete := make(map[string]bool)
+	if odata, err := os.ReadFile(cacheFilePath(lng, length, "_obsolete")); err == nil {
+		var listed []string
+		if json.Unmarshal(odata, &listed, permissiveJSON) == nil {
+			for _, word := range listed {
+				obsolete[word] = true
+			}
+		}
+	}
+	return &wordData{words: cached, hanzi: hanzi, etymology: etymology, obsolete: obsolete}, true
 }
 
 func getLanguages() map[string]string {

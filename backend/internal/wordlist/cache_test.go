@@ -1,6 +1,8 @@
 package wordlist
 
 import (
+	"maps"
+	"slices"
 	"testing"
 )
 
@@ -132,5 +134,63 @@ func TestRecordMeasuredLengthIgnoresExplicitLengths(t *testing.T) {
 	recordMeasuredLength("Vulcan", 7, 7)
 	if length, ok := RecordedLength("Vulcan"); ok {
 		t.Errorf("an explicit-length load recorded a median for a never-measured language: %d", length)
+	}
+}
+
+// installObsolete plants a loaded word list in the in-memory cache with the
+// given words flagged obsolete, and removes it again when the test ends.
+func installObsolete(t *testing.T, lng string, length int, words map[string]string, obsolete ...string) {
+	t.Helper()
+	flags := map[string]bool{}
+	for _, w := range obsolete {
+		flags[w] = true
+	}
+	key := Key{lng, length}
+	wlCache.mu.Lock()
+	wlCache.entries[key] = &entry{words: words, obsolete: flags}
+	wlCache.mu.Unlock()
+	t.Cleanup(func() {
+		wlCache.mu.Lock()
+		delete(wlCache.entries, key)
+		wlCache.mu.Unlock()
+	})
+}
+
+// A word whose every sense is obsolete/archaic/historical is still a legal
+// guess, but must never be the word to guess.
+func TestDailyAnswerSkipsObsoleteWords(t *testing.T) {
+	words := sampleWords()
+	dead := []string{"apple", "bread", "chair", "dream"}
+	installObsolete(t, "English", 5, words, dead...)
+
+	for range 20 {
+		got := DailyAnswer("English", 5, words)
+		if slices.Contains(dead, got) {
+			t.Fatalf("DailyAnswer picked obsolete word %q", got)
+		}
+		if _, ok := words[got]; !ok {
+			t.Fatalf("DailyAnswer returned %q, which is not in the word list", got)
+		}
+	}
+}
+
+// A dead language is obsolete end to end. Dropping every word would leave no
+// answer at all, so the whole list stays in play instead.
+func TestDailyAnswerFallsBackWhenAllObsolete(t *testing.T) {
+	words := sampleWords()
+	all := slices.Collect(maps.Keys(words))
+	installObsolete(t, "Latin", 5, words, all...)
+
+	got := DailyAnswer("Latin", 5, words)
+	if _, ok := words[got]; !ok {
+		t.Fatalf("DailyAnswer returned %q, want a word from the list", got)
+	}
+}
+
+// Nothing is excluded for a language whose cache predates obsolete tracking.
+func TestDailyAnswerWithoutCachedObsoleteSet(t *testing.T) {
+	words := sampleWords()
+	if got := DailyAnswer("Gothic", 5, words); got == "" {
+		t.Error("DailyAnswer returned no word with no cache entry loaded")
 	}
 }

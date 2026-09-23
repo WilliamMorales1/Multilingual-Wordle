@@ -181,7 +181,7 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 	slog.Info("game created", "id", game.ID, "lang", game.Lang, "length", game.WordLength)
 
 	alphabet := lang.BuildAlphabet(words, lang.ToneSplitKind(req.Lang))
-	keyboardRows, overflowBases, equivalences, rtl, matraMap, layoutName := keyboard.BuildGameExtras(alphabet, req.Lang, words)
+	extras := keyboard.BuildGameExtras(alphabet, req.Lang, words)
 	jsonOK(w, map[string]any{
 		"id":              game.ID,
 		"lang":            game.Lang,
@@ -189,12 +189,12 @@ func HandleNewGame(w http.ResponseWriter, r *http.Request) {
 		"status":          game.Status,
 		"guesses":         []guessResp{},
 		"alphabet":        alphabet,
-		"keyboard_rows":   keyboardRows,
-		"keyboard_layout": layoutName,
-		"overflow_bases":  overflowBases,
-		"equivalences":    equivalences,
-		"rtl":             rtl,
-		"matra_map":       matraMap,
+		"keyboard_rows":   extras.KeyboardRows,
+		"keyboard_layout": extras.LayoutName,
+		"overflow_bases":  extras.OverflowBases,
+		"equivalences":    extras.Equivalences,
+		"rtl":             extras.RTL,
+		"matra_map":       extras.MatraMap,
 		"key_states":      map[string]string{},
 	})
 }
@@ -214,16 +214,11 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var alphabet []string
-	var keyboardRows [][]string
-	var overflowBases []string
-	var equivalences [][]string
-	var rtl bool
-	var matraMap map[string]string
-	var layoutName string
+	var extras keyboard.GameExtras
 	toneLang := lang.ToneSplitKind(game.Lang)
 	if words := wordlist.GetWordListIfCached(game.Lang, game.WordLength); words != nil {
 		alphabet = lang.BuildAlphabet(words, toneLang)
-		keyboardRows, overflowBases, equivalences, rtl, matraMap, layoutName = keyboard.BuildGameExtras(alphabet, game.Lang, words)
+		extras = keyboard.BuildGameExtras(alphabet, game.Lang, words)
 	}
 
 	hanzi := wordlist.GetCachedHanzi(game.Lang, game.WordLength)
@@ -235,12 +230,12 @@ func HandleGetGame(w http.ResponseWriter, r *http.Request) {
 		"status":          game.Status,
 		"guesses":         guesses,
 		"alphabet":        alphabet,
-		"keyboard_rows":   keyboardRows,
-		"keyboard_layout": layoutName,
-		"overflow_bases":  overflowBases,
-		"equivalences":    equivalences,
-		"rtl":             rtl,
-		"matra_map":       matraMap,
+		"keyboard_rows":   extras.KeyboardRows,
+		"keyboard_layout": extras.LayoutName,
+		"overflow_bases":  extras.OverflowBases,
+		"equivalences":    extras.Equivalences,
+		"rtl":             extras.RTL,
+		"matra_map":       extras.MatraMap,
 		"key_states":      aggregateKeyStates(guesses, toneLang),
 	}
 	if game.Status != "playing" {

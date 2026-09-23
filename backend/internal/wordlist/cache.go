@@ -2,7 +2,9 @@ package wordlist
 
 import (
 	"encoding/binary"
+	"errors"
 	"hash/fnv"
+	"io/fs"
 	"log"
 	"maps"
 	"os"
@@ -24,6 +26,7 @@ type entry struct {
 	words      map[string]string // word→def
 	hanzi      map[string]string // romanized word→hanzi (for Chinese dialects only)
 	etymology  map[string]string // word→etymology text
+	obsolete   map[string]bool   // word→never picked as the answer (obsolete/archaic/historical)
 	normalized map[string]string // normalizedWord→canonical
 	overflow   map[string]bool   // base→bool
 }
@@ -53,12 +56,16 @@ var DownloadProgress sync.Map
 // language played at two lengths should not land on the same index of two
 // different word lists.
 //
+// Words whose every sense is obsolete, archaic or historical are dropped from
+// the candidates first: they stay valid guesses, but nobody could be expected
+// to arrive at one as the day's word.
+//
 // Returns "" for an empty word list rather than dividing by zero.
 func DailyAnswer(lng string, length int, words map[string]string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	keys := slices.Sorted(maps.Keys(words))
+	keys := answerCandidates(lng, length, words)
 
 	h := fnv.New64a()
 	h.Write([]byte(time.Now().UTC().Format("2006-01-02")))
@@ -66,6 +73,37 @@ func DailyAnswer(lng string, length int, words map[string]string) string {
 	h.Write(binary.BigEndian.AppendUint64(nil, uint64(length)))
 	idx := int(h.Sum64() % uint64(len(keys)))
 	return keys[idx]
+}
+
+// answerCandidates returns the sorted words the day's answer may be drawn
+// from. If dropping the obsolete ones would leave too thin a list to pick
+// from at all (a dead language is obsolete end to end), every word stays a
+// candidate — a playable answer beats no answer.
+func answerCandidates(lng string, length int, words map[string]string) []string {
+	obsolete := cachedObsolete(lng, length)
+	keys := make([]string, 0, len(words))
+	for word := range words {
+		if !obsolete[word] {
+			keys = append(keys, word)
+		}
+	}
+	if len(keys) < minWordListSize {
+		keys = slices.Collect(maps.Keys(words))
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// cachedObsolete returns the obsolete-word set of an already-loaded word
+// list, or nil — it never triggers a load, since the caller is holding that
+// list's words already.
+func cachedObsolete(lng string, length int) map[string]bool {
+	wlCache.mu.RLock()
+	defer wlCache.mu.RUnlock()
+	if e, ok := wlCache.entries[Key{lng, length}]; ok {
+		return e.obsolete
+	}
+	return nil
 }
 
 func GetCachedWordList(lng string, length int) (map[string]string, error) {
@@ -110,10 +148,11 @@ func getOrLoad(lng string, length int) (map[string]string, int, error) {
 		}
 	}
 
-	words, hanzi, etymology, length, err := loadWordList(lng, length)
+	data, length, err := loadWordList(lng, length)
 	if err != nil {
 		return nil, length, err
 	}
+	words := data.words
 	key := Key{lng, length}
 
 	toneLang := lang.ToneSplitKind(lng)
@@ -128,8 +167,9 @@ func getOrLoad(lng string, length int) (map[string]string, int, error) {
 	wlCache.mu.Lock()
 	wlCache.entries[key] = &entry{
 		words:      words,
-		hanzi:      hanzi,
-		etymology:  etymology,
+		hanzi:      data.hanzi,
+		etymology:  data.etymology,
+		obsolete:   data.obsolete,
 		normalized: normalized,
 		overflow:   overflowSet,
 	}
@@ -220,8 +260,8 @@ func ClearWordListCache(key Key) error {
 	}
 	wlCache.mu.Unlock()
 
-	for _, suffix := range []string{"", "_hanzi", "_etymology"} {
-		if err := os.Remove(cacheFilePath(key.Lang, key.Len, suffix)); err != nil && !os.IsNotExist(err) {
+	for _, suffix := range []string{"", "_hanzi", "_etymology", "_obsolete"} {
+		if err := os.Remove(cacheFilePath(key.Lang, key.Len, suffix)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}

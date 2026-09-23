@@ -494,22 +494,33 @@ func ComputeEquivalences(alphabet []string, overflowBaseSet map[string]bool, pla
 	return result
 }
 
-// BuildGameExtras computes all derived UI data from the alphabet in one call.
-func BuildGameExtras(alphabet []string, lng string, words map[string]string) (keyboardRows [][]string, overflowBases []string, equivalences [][]string, rtl bool, matraMap map[string]string, layoutName string) {
-	layoutName = layoutFor(lng, words)
+// GameExtras is the derived keyboard/UI data a game hands the client.
+type GameExtras struct {
+	KeyboardRows  [][]string        // base characters, one slice per keyboard row
+	OverflowBases []string          // alphabet bases no layout key holds, reached through "*"
+	Equivalences  [][]string        // [base, variant…] groups behind one key
+	RTL           bool              // the layout's script runs right to left
+	MatraMap      map[string]string // Indic combining marks, by base vowel
+	LayoutName    string            // the layout the rows were built from
+}
 
-	var placedExact map[string]bool
-	keyboardRows, overflowBases, placedExact = buildKeyboardDataForLayout(alphabet, layoutName)
+// BuildGameExtras computes all derived UI data from the alphabet in one call.
+func BuildGameExtras(alphabet []string, lng string, words map[string]string) GameExtras {
+	layoutName := layoutFor(lng, words)
+
+	rows, overflowBases, placedExact := buildKeyboardDataForLayout(alphabet, layoutName)
 	overflowSet := make(map[string]bool, len(overflowBases))
 	for _, b := range overflowBases {
 		overflowSet[b] = true
 	}
-	equivalences = ComputeEquivalences(alphabet, overflowSet, placedExact)
 
-	// this is so it is displayed ltr even if there are some in a rtl script in * chars
-	rtl = layoutName == "arabic" || layoutName == "hebrew"
-
-	matraMap = lang.MatraTable(layoutName)
-
-	return
+	return GameExtras{
+		KeyboardRows:  rows,
+		OverflowBases: overflowBases,
+		Equivalences:  ComputeEquivalences(alphabet, overflowSet, placedExact),
+		// this is so it is displayed ltr even if there are some in a rtl script in * chars
+		RTL:        layoutName == "arabic" || layoutName == "hebrew",
+		MatraMap:   lang.MatraTable(layoutName),
+		LayoutName: layoutName,
+	}
 }

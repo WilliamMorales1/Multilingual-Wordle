@@ -8,6 +8,7 @@ A multilingual Wordle game written in Go & TypeScript that works with any langua
 
 - **Automatic word length** - each language is played at the median word length of its own dictionary (clamped to 3–12 tiles)
 - **Per-language keyboard** - the layout is detected from the word list itself (qwerty/azerty/qwertz, Cyrillic, Arabic, Devanagari, hiragana, Ge'ez, Cherokee, syllabics, …), with an overflow `*` key for letters that don't fit
+- **Living vocabulary** - words tagged obsolete, archaic or historical in every sense are never the day's answer (they stay valid guesses)
 - **Statistics** - played, win %, current/max streak, guess distribution, share text
 - **Installable (PWA)** - manifest + service worker; in Chrome, three dots → add to home screen → install
 - **Terminal client (TUI)** - play from the command line against the same backend

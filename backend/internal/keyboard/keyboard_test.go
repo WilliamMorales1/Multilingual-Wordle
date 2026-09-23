@@ -163,14 +163,14 @@ func TestDetectLayoutDefaultsToQwerty(t *testing.T) {
 func TestBuildGameExtrasLayoutMatchesRows(t *testing.T) {
 	words := map[string]string{"λογος": "", "κοσμος": "", "φωνη": ""}
 	alphabet := lang.BuildAlphabet(words, "")
-	rows, _, _, rtl, _, layoutName := BuildGameExtras(alphabet, "", words)
-	if layoutName != "greek" {
-		t.Errorf("layoutName = %q, want greek", layoutName)
+	extras := BuildGameExtras(alphabet, "", words)
+	if extras.LayoutName != "greek" {
+		t.Errorf("layoutName = %q, want greek", extras.LayoutName)
 	}
-	if len(rows) == 0 {
+	if len(extras.KeyboardRows) == 0 {
 		t.Error("no keyboard rows built")
 	}
-	if rtl {
+	if extras.RTL {
 		t.Error("rtl = true for a Greek word list")
 	}
 }

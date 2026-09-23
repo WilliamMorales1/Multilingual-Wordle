@@ -22,9 +22,7 @@ func TestConcurrentWritesDoNotFailBusy(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, players*(guessesEach+1))
 	for range players {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			g := Game{Lang: "English", WordLength: 5, Answer: "words", Status: "playing"}
 			if err := CreateGame(&g); err != nil {
 				errCh <- err
@@ -46,7 +44,7 @@ func TestConcurrentWritesDoNotFailBusy(t *testing.T) {
 			if err := UpdateGameStatus(g.ID, "won"); err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errCh)

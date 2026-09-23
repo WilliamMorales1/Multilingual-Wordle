@@ -7,12 +7,12 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -284,13 +284,8 @@ func playGame(t *testing.T, mux *http.ServeMux, known []string, lng string) {
 // deterministically so a failure can be replayed.
 func pickWrong(t *testing.T, words map[string]string, answer string, n int) []string {
 	t.Helper()
-	keys := make([]string, 0, len(words))
-	for w := range words {
-		if w != answer {
-			keys = append(keys, w)
-		}
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(words))
+	keys = slices.DeleteFunc(keys, func(w string) bool { return w == answer })
 	if len(keys) < n {
 		t.Fatalf("word list has %d words besides the answer, need %d", len(keys), n)
 	}
