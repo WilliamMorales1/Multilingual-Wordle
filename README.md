@@ -9,6 +9,13 @@ A Wordle game in Go and TypeScript that works with any language on Wiktionary: E
 - Stats, share text, installable as a PWA.
 - Terminal client against the same backend.
 
+## Dependencies
+
+- Backend: Go 1.27+. Modules: `modernc.org/sqlite` (pure-Go SQLite), `prometheus/client_golang` (metrics), `golang.org/x/{net,text,term}`.
+- Frontend: Node.js and npm (Docker build uses Node 20). Dev only: TypeScript, esbuild.
+- Optional: [air](https://github.com/air-verse/air) for `make watch-backend`; Docker for the container build.
+- Word lists download from kaikki.org on first use.
+
 ## Running it
 
 ```
